@@ -8,7 +8,7 @@ from langchain_core.prompts import ChatPromptTemplate
 load_dotenv()
 
 # Fetch the API key
-openai_api_key = os.getenv("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")
+openai_api_key = os.getenv("OPENAI_API_KEY")
 
 # Validate
 if not openai_api_key:
