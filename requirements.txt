@@ -1,5 +1,5 @@
 streamlit
-langchain[pdf]
-openai
-faiss-cpu
 python-dotenv
+openai
+langchain[pdf]
+faiss-cpu
