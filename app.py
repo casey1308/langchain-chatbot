@@ -3,9 +3,7 @@ import os
 import tempfile
 from dotenv import load_dotenv
 
-# ────────────────────────────────────────────────
-# LangChain / OpenAI imports
-# ────────────────────────────────────────────────
+# LangChain and OpenAI
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain.document_loaders import PyPDFLoader
@@ -14,19 +12,15 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 
-# ────────────────────────────────────────────────
-# API key directly set here (for embedding + LLM)
-# ────────────────────────────────────────────────
-openai_api_key = "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"
+# Load API key from .env
+load_dotenv()
+openai_api_key = os.getenv("OPENAI_API_KEY")
 
 if not openai_api_key:
     st.error("❌ OPENAI_API_KEY not found. Please set it in a .env file.")
     st.stop()
 
-# ────────────────────────────────────────────────
-# Helper: build a Retrieval-QA chain from an uploaded PDF
-# ────────────────────────────────────────────────
-
+# Helper to build RAG chain
 def build_qa_chain(uploaded_file) -> RetrievalQA:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(uploaded_file.read())
@@ -44,7 +38,7 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
     system_template = (
         "You are Manna, a friendly and helpful AI assistant. "
         "Use ONLY the following context to answer the user. If the answer "
-        "is not in the context, say you don\'t know."
+        "is not in the context, say you don’t know."
         "\n\n{context}\n\nQuestion: {question}"
     )
 
@@ -60,19 +54,17 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     return qa_chain
 
-# ────────────────────────────────────────────────
-# Streamlit UI configuration
-# ────────────────────────────────────────────────
+# Streamlit UI
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI Chat Assistant")
 
 if "qa_chain" not in st.session_state:
     st.session_state.qa_chain = None
 
-uploaded_file = st.file_uploader("Upload a PDF to talk to it", type=["pdf"])
+uploaded_file = st.file_uploader("📄 Upload a PDF to chat with it", type=["pdf"])
 
 if uploaded_file is not None:
-    with st.spinner("Indexing your document… this may take a few seconds"):
+    with st.spinner("Indexing your document…"):
         st.session_state.qa_chain = build_qa_chain(uploaded_file)
     st.success("✅ Document indexed! Ask your questions below.")
 
