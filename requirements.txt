@@ -1,6 +1,5 @@
-langchain
-openai
 streamlit
+langchain[pdf]
+openai
 faiss-cpu
-pypdf
 python-dotenv
