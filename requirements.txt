@@ -1,5 +1,6 @@
-streamlit
-python-dotenv
 langchain
-langchain-openai
+openai
+streamlit
+faiss-cpu
 pypdf
+python-dotenv
