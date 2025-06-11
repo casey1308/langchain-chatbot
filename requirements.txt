@@ -1,5 +1,6 @@
 streamlit
 langchain
 langchain-openai
+langchain-community
 openai
-streamlit-audio-recorder
+python-dotenv
