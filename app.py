@@ -1,25 +1,16 @@
-import streamlit as st
-import os
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
+import os
 
-# Load environment variables
 load_dotenv()
+api_key = os.getenv("OPENAI_API_KEY")
 
-# Fetch the API key
-openai_api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise ValueError("OPENAI_API_KEY not set")
 
-# Validate
-if not openai_api_key:
-    st.error("❌ OPENAI_API_KEY not found. Please set it in a .env file.")
-    st.stop()
+from langchain_openai import ChatOpenAI
 
-# Initialize LLM
-llm = ChatOpenAI(
-    model="gpt-3.5-turbo",
-    openai_api_key=openai_api_key
-)
+llm = ChatOpenAI(model="gpt-3.5-turbo", api_key=api_key)
+
 
 # UI
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
