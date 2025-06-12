@@ -2,9 +2,9 @@ import streamlit as st
 import os
 import tempfile
 from dotenv import load_dotenv
-from io import BytesIO
-import wave
 import openai
+import wave
+from io import BytesIO
 
 # LangChain and OpenAI
 from langchain_openai import ChatOpenAI
@@ -15,11 +15,11 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 
-# Audio recording
-from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
+# Voice recording
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, ClientSettings
 import av
 
-# Load API key from .env
+# Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
@@ -27,7 +27,7 @@ if not openai_api_key:
     st.error("❌ OPENAI_API_KEY not found. Please set it in a .env file.")
     st.stop()
 
-# Helper to build RAG chain
+# Build RAG Chain
 def build_qa_chain(uploaded_file) -> RetrievalQA:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(uploaded_file.read())
@@ -61,35 +61,33 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     return qa_chain
 
-# Audio processor for recording
+# Audio Processor
 class AudioProcessor(AudioProcessorBase):
     def __init__(self):
-        self.buffer = BytesIO()
+        self.audio_frames = []
 
     def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
-        audio = frame.to_ndarray().tobytes()
-        self.buffer.write(audio)
+        self.audio_frames.append(frame)
         return frame
 
-    def get_audio_bytes(self):
-        return self.buffer.getvalue()
+# Transcription Function
+def transcribe_audio_frames(frames):
+    if not frames:
+        return ""
 
-def transcribe_audio(audio_bytes):
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    with wave.open(temp_file.name, 'wb') as wf:
+    audio = BytesIO()
+    with wave.open(audio, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
         wf.setframerate(48000)
-        wf.writeframes(audio_bytes)
-    with open(temp_file.name, "rb") as audio_file:
-        response = openai.Audio.transcribe(
-            model="whisper-1",
-            file=audio_file,
-            api_key=openai_api_key
-        )
+        for frame in frames:
+            wf.writeframes(frame.planes[0].to_bytes())
+
+    audio.seek(0)
+    response = openai.Audio.transcribe("whisper-1", audio, api_key=openai_api_key)
     return response["text"]
 
-# Streamlit UI
+# UI Setup
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI Chat Assistant")
 
@@ -106,41 +104,25 @@ if uploaded_file is not None:
 with st.chat_message("ai"):
     st.markdown("Hi there! I'm **Manna**, your helpful AI assistant. Ask me anything!")
 
-# Voice recording section
+# Voice input section
 with st.expander("🎙️ Record Your Voice"):
-    ctx = webrtc_streamer(
-        key="speech",
-        audio_processor_factory=AudioProcessor,
-        media_stream_constraints={
-            "audio": {
-                "sampleRate": 48000,
-                "channelCount": 1,
-                "echoCancellation": True
-            },
-            "video": False,
-        },
-    )
-    if ctx.audio_processor:
+    st.write("Press the 'Start' button below and speak. Then click 'Transcribe Audio'.")
+    ctx = webrtc_streamer(key="speech", mode="sendonly", audio_processor_factory=AudioProcessor)
+
+    if ctx.state.playing and ctx.audio_processor:
         if st.button("Transcribe Audio"):
-            audio_bytes = ctx.audio_processor.get_audio_bytes()
-            st.write(f"Captured {len(audio_bytes)} bytes of audio.")  # 👈 DEBUG line
-            if audio_bytes:
-                with st.spinner("Transcribing..."):
-                    try:
-                        user_input = transcribe_audio(audio_bytes)
+            with st.spinner("Transcribing your voice..."):
+                try:
+                    user_input = transcribe_audio_frames(ctx.audio_processor.audio_frames)
+                    if user_input:
                         st.success(f"🗣️ You said: **{user_input}**")
-                        st.session_state.last_voice_input = user_input
-                    except Exception as e:
-                        st.error(f"❌ Transcription failed: {e}")
-            else:
-                st.error("❌ No audio captured. Try again.")
+                    else:
+                        st.warning("⚠️ No audio captured. Please try again.")
+                except Exception as e:
+                    st.error(f"❌ Transcription failed: {str(e)}")
 
 # Text input
 user_input = st.chat_input("Say something…")
-
-if not user_input and "last_voice_input" in st.session_state:
-    user_input = st.session_state.last_voice_input
-    st.session_state.last_voice_input = None
 
 if user_input:
     with st.chat_message("user"):
