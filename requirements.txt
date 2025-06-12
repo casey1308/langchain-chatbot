@@ -1,12 +1,8 @@
-streamlit>=1.45.0
-python-dotenv
+streamlit
 openai
 langchain
-langchain-community
-faiss-cpu
-pypdf
 langchain-openai
-streamlit-audio-recorder
+langchain-community
+python-dotenv
 pydub
-openai
-
+git+https://github.com/mkhorasani/streamlit_audio_recorder
