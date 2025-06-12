@@ -2,9 +2,15 @@ import streamlit as st
 import os
 import tempfile
 from dotenv import load_dotenv
-from io import BytesIO
 import openai
+from io import BytesIO
+import av
+import numpy as np
+import queue
+import threading
+import time
 
+# LangChain and OpenAI
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
@@ -13,11 +19,8 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 
-from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
-
-import av
-import numpy as np
-import queue
+# WebRTC for voice input
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, ClientSettings
 
 # Load environment variables
 load_dotenv()
@@ -61,7 +64,7 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     return qa_chain
 
-# UI Setup
+# Streamlit App UI
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI Chat Assistant")
 
@@ -78,73 +81,85 @@ if uploaded_file is not None:
 with st.chat_message("ai"):
     st.markdown("Hi there! I'm **Manna**, your helpful AI assistant. Ask me anything!")
 
-# ----------- 🎙️ Microphone Section using WebRTC ------------
-st.subheader("🎤 Speak to Manna in Real Time")
+# ====================
+# 🎙️ LIVE VOICE INPUT
+# ====================
+
+st.subheader("🎙️ Speak to Manna (Live Mic)")
 
 audio_queue = queue.Queue()
 
 class AudioProcessor(AudioProcessorBase):
+    def __init__(self) -> None:
+        self.recorded_frames = []
+        self.start_time = time.time()
+
     def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
         audio = frame.to_ndarray().flatten().astype(np.int16).tobytes()
         audio_queue.put(audio)
         return frame
 
+WEBRTC_CLIENT_SETTINGS = ClientSettings(
+    media_stream_constraints={"video": False, "audio": True},
+    rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+)
+
 ctx = webrtc_streamer(
     key="audio",
     mode="SENDONLY",
-    audio_receiver_size=1024,
-    client_settings={"media_stream_constraints": {"audio": True, "video": False}},
+    client_settings=WEBRTC_CLIENT_SETTINGS,
     audio_processor_factory=AudioProcessor,
     async_processing=True,
 )
 
+user_input = None
+
 if ctx.state.playing:
-    st.info("🎙️ Recording… Speak now!")
+    st.info("🎤 Listening... Speak now")
+    if st.button("🛑 Stop Recording and Transcribe"):
+        st.success("⏳ Transcribing your voice...")
 
-    if st.button("🛑 Stop and Transcribe"):
-        audio_bytes = b''.join(list(audio_queue.queue))
-        audio_queue.queue.clear()
-        audio_io = BytesIO(audio_bytes)
+        # Gather audio bytes from the queue
+        all_audio = b""
+        while not audio_queue.empty():
+            all_audio += audio_queue.get()
 
-        try:
-            with st.spinner("Transcribing your voice..."):
-                response = openai.Audio.transcribe("whisper-1", audio_io, api_key=openai_api_key)
+        if all_audio:
+            try:
+                # Save audio temporarily
+                temp_wav = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                temp_wav.write(all_audio)
+                temp_wav.close()
+
+                # Transcribe using Whisper
+                with open(temp_wav.name, "rb") as f:
+                    response = openai.Audio.transcribe("whisper-1", f, api_key=openai_api_key)
                 user_input = response["text"]
                 st.success(f"🗣️ You said: **{user_input}**")
-        except Exception as e:
-            st.error(f"❌ Transcription failed: {str(e)}")
-        else:
-            if user_input:
-                with st.chat_message("user"):
-                    st.markdown(user_input)
 
-                if st.session_state.qa_chain is not None:
-                    answer = st.session_state.qa_chain.run(user_input)
-                else:
-                    prompt = ChatPromptTemplate.from_messages([
-                        ("system", "You are Manna, a friendly and helpful AI assistant."),
-                        ("human", "{input}")
-                    ])
-                    chain = prompt | ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
-                    answer = chain.invoke({"input": user_input}).content
+            except Exception as e:
+                st.error(f"❌ Transcription failed: {str(e)}")
 
-                with st.chat_message("ai"):
-                    st.markdown(answer)
-else:
-    user_input = st.chat_input("Or type something here…")
-    if user_input:
-        with st.chat_message("user"):
-            st.markdown(user_input)
+# Text chat fallback
+if not user_input:
+    user_input = st.chat_input("Say something…")
 
-        if st.session_state.qa_chain is not None:
-            answer = st.session_state.qa_chain.run(user_input)
-        else:
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", "You are Manna, a friendly and helpful AI assistant."),
-                ("human", "{input}")
-            ])
-            chain = prompt | ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
-            answer = chain.invoke({"input": user_input}).content
+# ====================
+# 💬 RAG RESPONSE
+# ====================
+if user_input:
+    with st.chat_message("user"):
+        st.markdown(user_input)
 
-        with st.chat_message("ai"):
-            st.markdown(answer)
+    if st.session_state.qa_chain is not None:
+        answer = st.session_state.qa_chain.run(user_input)
+    else:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are Manna, a friendly and helpful AI assistant."),
+            ("human", "{input}")
+        ])
+        chain = prompt | ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
+        answer = chain.invoke({"input": user_input}).content
+
+    with st.chat_message("ai"):
+        st.markdown(answer)
