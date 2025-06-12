@@ -2,6 +2,9 @@ import streamlit as st
 import os
 import tempfile
 from dotenv import load_dotenv
+from io import BytesIO
+from pydub import AudioSegment
+import openai
 
 # LangChain and OpenAI
 from langchain_openai import ChatOpenAI
@@ -12,11 +15,9 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 
-# Whisper audio
-from streamlit_audio_recorder import audio_recorder
-from io import BytesIO
-from pydub import AudioSegment
-import openai
+# Audio recording
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
+import av
 
 # Load API key from .env
 load_dotenv()
@@ -60,18 +61,26 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     return qa_chain
 
-# Whisper audio transcription
-def transcribe_audio(audio_bytes):
-    audio = AudioSegment.from_file(BytesIO(audio_bytes), format="wav")
-    buffer = BytesIO()
-    audio.export(buffer, format="mp3")
-    buffer.seek(0)
-    transcript = openai.Audio.transcribe("whisper-1", buffer, api_key=openai_api_key)
-    return transcript["text"]
+# Audio processor for recording
+class AudioProcessor(AudioProcessorBase):
+    def __init__(self):
+        self.buffer = BytesIO()
 
-# ───────────────────────────────────────────────
+    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+        audio = frame.to_ndarray().tobytes()
+        self.buffer.write(audio)
+        return frame
+
+def transcribe_streamed_audio(audio_buffer):
+    audio_buffer.seek(0)
+    audio = AudioSegment.from_raw(audio_buffer, sample_width=2, frame_rate=48000, channels=1)
+    mp3_buffer = BytesIO()
+    audio.export(mp3_buffer, format="mp3")
+    mp3_buffer.seek(0)
+    result = openai.Audio.transcribe("whisper-1", mp3_buffer, api_key=openai_api_key)
+    return result["text"]
+
 # Streamlit UI
-# ───────────────────────────────────────────────
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI Chat Assistant")
 
@@ -88,19 +97,20 @@ if uploaded_file is not None:
 with st.chat_message("ai"):
     st.markdown("Hi there! I'm **Manna**, your helpful AI assistant. Ask me anything!")
 
-# Voice input
-user_input = None
-with st.expander("🎙️ Or record your voice"):
-    audio_bytes = audio_recorder(pause_threshold=2.0)
-    if audio_bytes:
-        st.audio(audio_bytes, format="audio/wav")
-        with st.spinner("Transcribing your voice..."):
-            user_input = transcribe_audio(audio_bytes)
-        st.success(f"🗣️ You said: **{user_input}**")
+# Voice recording section
+with st.expander("🎙️ Record Your Voice"):
+    ctx = webrtc_streamer(key="speech", audio_processor_factory=AudioProcessor)
+    if ctx.audio_processor:
+        if st.button("Transcribe Audio"):
+            with st.spinner("Transcribing..."):
+                try:
+                    user_input = transcribe_streamed_audio(ctx.audio_processor.buffer)
+                    st.success(f"🗣️ You said: **{user_input}**")
+                except Exception as e:
+                    st.error("❌ Transcription failed. Try again.")
 
-# Fallback: Text input
-if user_input is None:
-    user_input = st.chat_input("Say something…")
+# Text input
+user_input = st.chat_input("Say something…")
 
 if user_input:
     with st.chat_message("user"):
