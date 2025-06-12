@@ -3,7 +3,6 @@ import os
 import tempfile
 from dotenv import load_dotenv
 import openai
-import wave
 from io import BytesIO
 
 # LangChain and OpenAI
@@ -14,10 +13,6 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
-
-# Voice recording
-from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, ClientSettings
-import av
 
 # Load environment variables
 load_dotenv()
@@ -61,32 +56,6 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     return qa_chain
 
-# Audio Processor
-class AudioProcessor(AudioProcessorBase):
-    def __init__(self):
-        self.audio_frames = []
-
-    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
-        self.audio_frames.append(frame)
-        return frame
-
-# Transcription Function
-def transcribe_audio_frames(frames):
-    if not frames:
-        return ""
-
-    audio = BytesIO()
-    with wave.open(audio, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(48000)
-        for frame in frames:
-            wf.writeframes(frame.planes[0].to_bytes())
-
-    audio.seek(0)
-    response = openai.Audio.transcribe("whisper-1", audio, api_key=openai_api_key)
-    return response["text"]
-
 # UI Setup
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI Chat Assistant")
@@ -104,25 +73,24 @@ if uploaded_file is not None:
 with st.chat_message("ai"):
     st.markdown("Hi there! I'm **Manna**, your helpful AI assistant. Ask me anything!")
 
-# Voice input section
-with st.expander("🎙️ Record Your Voice"):
-    st.write("Press the 'Start' button below and speak. Then click 'Transcribe Audio'.")
-    ctx = webrtc_streamer(key="speech", mode="sendonly", audio_processor_factory=AudioProcessor)
+# Voice input section using st.audio + Whisper
+st.subheader("🎙️ Speak to Manna")
 
-    if ctx.state.playing and ctx.audio_processor:
-        if st.button("Transcribe Audio"):
-            with st.spinner("Transcribing your voice..."):
-                try:
-                    user_input = transcribe_audio_frames(ctx.audio_processor.audio_frames)
-                    if user_input:
-                        st.success(f"🗣️ You said: **{user_input}**")
-                    else:
-                        st.warning("⚠️ No audio captured. Please try again.")
-                except Exception as e:
-                    st.error(f"❌ Transcription failed: {str(e)}")
+audio_file = st.file_uploader("Upload a WAV file or record using the button below", type=["wav"])
 
-# Text input
-user_input = st.chat_input("Say something…")
+if audio_file:
+    st.audio(audio_file, format='audio/wav')
+    with st.spinner("Transcribing your voice..."):
+        try:
+            audio_bytes = audio_file.read()
+            audio_io = BytesIO(audio_bytes)
+            response = openai.Audio.transcribe("whisper-1", audio_io, api_key=openai_api_key)
+            user_input = response["text"]
+            st.success(f"🗣️ You said: **{user_input}**")
+        except Exception as e:
+            st.error(f"❌ Transcription failed: {str(e)}")
+else:
+    user_input = st.chat_input("Say something…")
 
 if user_input:
     with st.chat_message("user"):
