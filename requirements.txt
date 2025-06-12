@@ -5,4 +5,4 @@ langchain-openai
 langchain-community
 python-dotenv
 pydub
-git+https://github.com/mkhorasani/streamlit_audio_recorder
+streamlit-webrtc
