@@ -12,6 +12,12 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 
+# Whisper audio
+from streamlit_audio_recorder import audio_recorder
+from io import BytesIO
+from pydub import AudioSegment
+import openai
+
 # Load API key from .env
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -54,7 +60,18 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     return qa_chain
 
+# Whisper audio transcription
+def transcribe_audio(audio_bytes):
+    audio = AudioSegment.from_file(BytesIO(audio_bytes), format="wav")
+    buffer = BytesIO()
+    audio.export(buffer, format="mp3")
+    buffer.seek(0)
+    transcript = openai.Audio.transcribe("whisper-1", buffer, api_key=openai_api_key)
+    return transcript["text"]
+
+# ───────────────────────────────────────────────
 # Streamlit UI
+# ───────────────────────────────────────────────
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI Chat Assistant")
 
@@ -71,16 +88,18 @@ if uploaded_file is not None:
 with st.chat_message("ai"):
     st.markdown("Hi there! I'm **Manna**, your helpful AI assistant. Ask me anything!")
 
-# 🔊 Voice input (Streamlit native audio_input)
-voice = st.audio_input("🎤 Or record your question")
-
+# Voice input
 user_input = None
+with st.expander("🎙️ Or record your voice"):
+    audio_bytes = audio_recorder(pause_threshold=2.0)
+    if audio_bytes:
+        st.audio(audio_bytes, format="audio/wav")
+        with st.spinner("Transcribing your voice..."):
+            user_input = transcribe_audio(audio_bytes)
+        st.success(f"🗣️ You said: **{user_input}**")
 
-if voice is not None:
-    st.audio(voice)
-    # Phase 3: Use OpenAI Whisper to transcribe `voice` to text
-    user_input = "Voice input received (transcription to be implemented)"
-else:
+# Fallback: Text input
+if user_input is None:
     user_input = st.chat_input("Say something…")
 
 if user_input:
