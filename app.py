@@ -1,55 +1,110 @@
 import streamlit as st
-from streamlit_js_eval import streamlit_js_eval
-from io import BytesIO
-import base64
-import openai
-from dotenv import load_dotenv
 import os
+import tempfile
+from dotenv import load_dotenv
+import openai
+from io import BytesIO
 
-# Load API key
+# LangChain & OpenAI
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+
+# Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
+
 if not openai_api_key:
-    st.error("❌ OPENAI_API_KEY not found. Please add it in a .env file.")
+    st.error("❌ OPENAI_API_KEY not found. Please set it in a .env file.")
     st.stop()
 
-st.set_page_config(page_title="Manna - Voice Chatbot", page_icon="🎙️")
-st.title("🎙️ Talk to Manna - Live Mic Voice Input")
+# Build RAG chain from uploaded PDF
+def build_qa_chain(uploaded_file) -> RetrievalQA:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(uploaded_file.read())
+        pdf_path = tmp.name
 
-# Mic button
-st.markdown("Click the button below and speak. It records 5 seconds of audio:")
-audio_bytes = streamlit_js_eval(js_expressions="await record_audio()", key="audio")
+    loader = PyPDFLoader(pdf_path)
+    documents = loader.load()
 
-user_input = None
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    chunks = splitter.split_documents(documents)
 
-if audio_bytes:
-    st.audio(audio_bytes, format="audio/webm")
-    with st.spinner("Transcribing..."):
+    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
+    vectorstore = FAISS.from_documents(chunks, embeddings)
+
+    system_template = (
+        "You are Manna, a friendly and helpful AI assistant. "
+        "Use ONLY the following context to answer the user. "
+        "If the answer is not in the context, say you don’t know."
+        "\n\n{context}\n\nQuestion: {question}"
+    )
+
+    prompt = PromptTemplate(input_variables=["context", "question"], template=system_template)
+
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key),
+        retriever=vectorstore.as_retriever(),
+        chain_type_kwargs={"prompt": prompt},
+    )
+
+    return qa_chain
+
+# Streamlit UI
+st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
+st.title("🤖 Meet Manna - Your AI Chat Assistant")
+
+if "qa_chain" not in st.session_state:
+    st.session_state.qa_chain = None
+
+uploaded_file = st.file_uploader("📄 Upload a PDF to chat with it", type=["pdf"])
+
+if uploaded_file is not None:
+    with st.spinner("Indexing your document…"):
+        st.session_state.qa_chain = build_qa_chain(uploaded_file)
+    st.success("✅ Document indexed! Ask your questions below.")
+
+# Intro message
+with st.chat_message("ai"):
+    st.markdown("Hi there! I'm **Manna**, your helpful AI assistant. Ask me anything!")
+
+# 🎙️ Voice input via WAV upload
+st.subheader("🎤 Speak to Manna")
+
+audio_file = st.file_uploader("🔴 Record in your browser (WAV) and upload it here", type=["wav"])
+
+if audio_file:
+    st.audio(audio_file, format='audio/wav')
+    with st.spinner("Transcribing your voice..."):
         try:
-            audio_file = BytesIO(audio_bytes)
-            transcript = openai.Audio.transcribe("whisper-1", audio_file, api_key=openai_api_key)
-            user_input = transcript["text"]
+            audio_bytes = audio_file.read()
+            audio_io = BytesIO(audio_bytes)
+            response = openai.Audio.transcribe("whisper-1", audio_io, api_key=openai_api_key)
+            user_input = response["text"]
             st.success(f"🗣️ You said: **{user_input}**")
         except Exception as e:
             st.error(f"❌ Transcription failed: {str(e)}")
+else:
+    user_input = st.chat_input("Or type here…")
 
-# Fallback: manual text
-user_input = st.chat_input("Or type your question here") or user_input
-
+# Handle chat input (typed or spoken)
 if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # Simple direct reply from Manna
-    chat = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        api_key=openai_api_key,
-        messages=[
-            {"role": "system", "content": "You are Manna, a helpful and friendly AI assistant."},
-            {"role": "user", "content": user_input},
-        ]
-    )
-    response = chat.choices[0].message["content"]
+    if st.session_state.qa_chain is not None:
+        answer = st.session_state.qa_chain.run(user_input)
+    else:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are Manna, a friendly and helpful AI assistant."),
+            ("human", "{input}")
+        ])
+        chain = prompt | ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
+        answer = chain.invoke({"input": user_input}).content
 
     with st.chat_message("ai"):
-        st.markdown(response)
+        st.markdown(answer)
