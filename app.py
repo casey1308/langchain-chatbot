@@ -4,9 +4,6 @@ import tempfile
 from dotenv import load_dotenv
 import openai
 from io import BytesIO
-import sounddevice as sd
-import numpy as np
-import scipy.io.wavfile as wav
 
 # LangChain and OpenAI
 from langchain_openai import ChatOpenAI
@@ -76,35 +73,35 @@ if uploaded_file is not None:
 with st.chat_message("ai"):
     st.markdown("Hi there! I'm **Manna**, your helpful AI assistant. Ask me anything!")
 
-# VOICE RECORDING SECTION
-st.subheader("🎙️ Speak to Manna (Live 10s Recording)")
+# Voice input section using audio file upload + Whisper
+st.subheader("🎙️ Speak to Manna (Upload Your Voice)")
 
-language = st.selectbox("🌐 Choose language spoken:", options=[
-    "en", "hi", "es", "fr", "de", "zh", "ja"
-], index=0)
+audio_file = st.file_uploader("Upload a WAV audio file to transcribe and ask", type=["wav"])
 
-if st.button("🎤 Click to Record"):
-    duration = 10  # seconds
-    fs = 44100
-    st.info("🎙️ Recording for 10 seconds…")
-    try:
-        audio = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
-        sd.wait()
-        audio_path = os.path.join(tempfile.gettempdir(), "temp_audio.wav")
-        wav.write(audio_path, fs, audio)
+if audio_file:
+    st.audio(audio_file, format='audio/wav')
+    with st.spinner("🔍 Transcribing your voice with Whisper..."):
+        try:
+            audio_bytes = audio_file.read()
+            audio_io = BytesIO(audio_bytes)
 
-        st.success("✅ Recording complete. Transcribing...")
-        with open(audio_path, "rb") as f:
-            response = openai.Audio.transcribe("whisper-1", f, api_key=openai_api_key, language=language)
+            response = openai.Audio.transcribe(
+                model="whisper-1",
+                file=audio_io,
+                api_key=openai_api_key,
+                response_format="json",
+                language="auto",  # Auto-detect
+                prompt="Translate into English if needed."
+            )
             user_input = response["text"]
             st.success(f"🗣️ You said: **{user_input}**")
-    except Exception as e:
-        st.error(f"❌ Error recording or transcribing: {str(e)}")
-        user_input = None
+        except Exception as e:
+            st.error(f"❌ Transcription failed: {str(e)}")
+            user_input = None
 else:
-    user_input = st.chat_input("Say something…")
+    user_input = st.chat_input("💬 Ask me something…")
 
-# Handle text or transcribed input
+# Handle user input from chat or audio
 if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
