@@ -2,10 +2,9 @@ import streamlit as st
 import os
 import tempfile
 from dotenv import load_dotenv
-import openai
 from io import BytesIO
+import openai
 
-# LangChain and OpenAI
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
@@ -13,6 +12,12 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
+
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
+
+import av
+import numpy as np
+import queue
 
 # Load environment variables
 load_dotenv()
@@ -73,38 +78,73 @@ if uploaded_file is not None:
 with st.chat_message("ai"):
     st.markdown("Hi there! I'm **Manna**, your helpful AI assistant. Ask me anything!")
 
-# Voice input section using st.audio + Whisper
-st.subheader("🎙️ Speak to Manna")
+# ----------- 🎙️ Microphone Section using WebRTC ------------
+st.subheader("🎤 Speak to Manna in Real Time")
 
-audio_file = st.file_uploader("Upload a WAV file or record using the button below", type=["wav"])
+audio_queue = queue.Queue()
 
-if audio_file:
-    st.audio(audio_file, format='audio/wav')
-    with st.spinner("Transcribing your voice..."):
+class AudioProcessor(AudioProcessorBase):
+    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+        audio = frame.to_ndarray().flatten().astype(np.int16).tobytes()
+        audio_queue.put(audio)
+        return frame
+
+ctx = webrtc_streamer(
+    key="audio",
+    mode="SENDONLY",
+    audio_receiver_size=1024,
+    client_settings={"media_stream_constraints": {"audio": True, "video": False}},
+    audio_processor_factory=AudioProcessor,
+    async_processing=True,
+)
+
+if ctx.state.playing:
+    st.info("🎙️ Recording… Speak now!")
+
+    if st.button("🛑 Stop and Transcribe"):
+        audio_bytes = b''.join(list(audio_queue.queue))
+        audio_queue.queue.clear()
+        audio_io = BytesIO(audio_bytes)
+
         try:
-            audio_bytes = audio_file.read()
-            audio_io = BytesIO(audio_bytes)
-            response = openai.Audio.transcribe("whisper-1", audio_io, api_key=openai_api_key)
-            user_input = response["text"]
-            st.success(f"🗣️ You said: **{user_input}**")
+            with st.spinner("Transcribing your voice..."):
+                response = openai.Audio.transcribe("whisper-1", audio_io, api_key=openai_api_key)
+                user_input = response["text"]
+                st.success(f"🗣️ You said: **{user_input}**")
         except Exception as e:
             st.error(f"❌ Transcription failed: {str(e)}")
+        else:
+            if user_input:
+                with st.chat_message("user"):
+                    st.markdown(user_input)
+
+                if st.session_state.qa_chain is not None:
+                    answer = st.session_state.qa_chain.run(user_input)
+                else:
+                    prompt = ChatPromptTemplate.from_messages([
+                        ("system", "You are Manna, a friendly and helpful AI assistant."),
+                        ("human", "{input}")
+                    ])
+                    chain = prompt | ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
+                    answer = chain.invoke({"input": user_input}).content
+
+                with st.chat_message("ai"):
+                    st.markdown(answer)
 else:
-    user_input = st.chat_input("Say something…")
+    user_input = st.chat_input("Or type something here…")
+    if user_input:
+        with st.chat_message("user"):
+            st.markdown(user_input)
 
-if user_input:
-    with st.chat_message("user"):
-        st.markdown(user_input)
+        if st.session_state.qa_chain is not None:
+            answer = st.session_state.qa_chain.run(user_input)
+        else:
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are Manna, a friendly and helpful AI assistant."),
+                ("human", "{input}")
+            ])
+            chain = prompt | ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
+            answer = chain.invoke({"input": user_input}).content
 
-    if st.session_state.qa_chain is not None:
-        answer = st.session_state.qa_chain.run(user_input)
-    else:
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are Manna, a friendly and helpful AI assistant."),
-            ("human", "{input}")
-        ])
-        chain = prompt | ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
-        answer = chain.invoke({"input": user_input}).content
-
-    with st.chat_message("ai"):
-        st.markdown(answer)
+        with st.chat_message("ai"):
+            st.markdown(answer)
