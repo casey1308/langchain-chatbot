@@ -4,8 +4,8 @@ import tempfile
 from dotenv import load_dotenv
 import openai
 from io import BytesIO
+import base64
 
-# LangChain & OpenAI
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
@@ -14,15 +14,14 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 
-# Load environment variables
+# Load API key
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
-
 if not openai_api_key:
-    st.error("❌ OPENAI_API_KEY not found. Please set it in a .env file.")
+    st.error("❌ OPENAI_API_KEY not found in .env")
     st.stop()
 
-# Build RAG chain from uploaded PDF
+# Build QA Chain
 def build_qa_chain(uploaded_file) -> RetrievalQA:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(uploaded_file.read())
@@ -39,12 +38,14 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     system_template = (
         "You are Manna, a friendly and helpful AI assistant. "
-        "Use ONLY the following context to answer the user. "
-        "If the answer is not in the context, say you don’t know."
+        "Use ONLY the following context to answer the user. If the answer "
+        "is not in the context, say you don’t know."
         "\n\n{context}\n\nQuestion: {question}"
     )
 
-    prompt = PromptTemplate(input_variables=["context", "question"], template=system_template)
+    prompt = PromptTemplate(
+        input_variables=["context", "question"], template=system_template
+    )
 
     qa_chain = RetrievalQA.from_chain_type(
         llm=ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key),
@@ -54,7 +55,7 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     return qa_chain
 
-# Streamlit UI
+# UI
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI Chat Assistant")
 
@@ -63,44 +64,76 @@ if "qa_chain" not in st.session_state:
 
 uploaded_file = st.file_uploader("📄 Upload a PDF to chat with it", type=["pdf"])
 
-if uploaded_file is not None:
-    with st.spinner("Indexing your document…"):
+if uploaded_file:
+    with st.spinner("Indexing document…"):
         st.session_state.qa_chain = build_qa_chain(uploaded_file)
-    st.success("✅ Document indexed! Ask your questions below.")
+    st.success("✅ Document indexed. You can now ask questions.")
 
-# Intro message
 with st.chat_message("ai"):
-    st.markdown("Hi there! I'm **Manna**, your helpful AI assistant. Ask me anything!")
+    st.markdown("Hi! I'm **Manna**, your AI assistant. Ask me anything!")
 
-# 🎙️ Voice input via WAV upload
-st.subheader("🎤 Speak to Manna")
+# Voice Recorder HTML
+st.subheader("🎙️ Live Voice Recording")
 
-audio_file = st.file_uploader("🔴 Record in your browser (WAV) and upload it here", type=["wav"])
+record_audio_html = """
+<script>
+let mediaRecorder;
+let recordedChunks = [];
 
-if audio_file:
-    st.audio(audio_file, format='audio/wav')
-    with st.spinner("Transcribing your voice..."):
-        try:
-            audio_bytes = audio_file.read()
-            audio_io = BytesIO(audio_bytes)
-            response = openai.Audio.transcribe("whisper-1", audio_io, api_key=openai_api_key)
-            user_input = response["text"]
-            st.success(f"🗣️ You said: **{user_input}**")
-        except Exception as e:
-            st.error(f"❌ Transcription failed: {str(e)}")
+function startRecording() {
+    recordedChunks = [];
+    navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(function(stream) {
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.start();
+
+        mediaRecorder.ondataavailable = function(event) {
+            if (event.data.size > 0) {
+                recordedChunks.push(event.data);
+            }
+        };
+
+        mediaRecorder.onstop = function() {
+            let blob = new Blob(recordedChunks, { type: 'audio/wav' });
+            let reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = function() {
+                let base64data = reader.result.split(',')[1];
+                window.parent.postMessage({ type: 'audio', data: base64data }, '*');
+            };
+        };
+
+        setTimeout(() => mediaRecorder.stop(), 5000); // auto-stop after 5 seconds
+    });
+}
+</script>
+
+<button onclick="startRecording()">🎤 Record (5s)</button>
+"""
+
+st.components.v1.html(record_audio_html, height=100)
+
+# Receive audio blob from frontend
+audio_data = st.experimental_get_query_params().get("audio", [None])[0]
+if audio_data:
+    audio_bytes = BytesIO(base64.b64decode(audio_data))
+    with st.spinner("Transcribing..."):
+        response = openai.Audio.transcribe("whisper-1", audio_bytes, api_key=openai_api_key)
+        user_input = response["text"]
+        st.success(f"🗣️ You said: **{user_input}**")
 else:
-    user_input = st.chat_input("Or type here…")
+    user_input = st.chat_input("💬 Type here or use the mic")
 
-# Handle chat input (typed or spoken)
+# Handle Query
 if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    if st.session_state.qa_chain is not None:
+    if st.session_state.qa_chain:
         answer = st.session_state.qa_chain.run(user_input)
     else:
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are Manna, a friendly and helpful AI assistant."),
+            ("system", "You are Manna, a helpful AI assistant."),
             ("human", "{input}")
         ])
         chain = prompt | ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
