@@ -6,3 +6,7 @@ langchain-community
 faiss-cpu
 pypdf
 langchain-openai
+streamlit-audio-recorder
+pydub
+openai
+
