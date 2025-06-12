@@ -1,9 +1,10 @@
 streamlit
+openai
+python-dotenv
 langchain
 langchain-openai
 langchain-community
-openai
-python-dotenv
-pydub
+faiss-cpu
+PyPDF2
 streamlit-webrtc
 av
