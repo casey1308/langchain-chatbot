@@ -71,7 +71,17 @@ if uploaded_file is not None:
 with st.chat_message("ai"):
     st.markdown("Hi there! I'm **Manna**, your helpful AI assistant. Ask me anything!")
 
-user_input = st.chat_input("Say something…")
+# 🔊 Voice input (Streamlit native audio_input)
+voice = st.audio_input("🎤 Or record your question")
+
+user_input = None
+
+if voice is not None:
+    st.audio(voice)
+    # Phase 3: Use OpenAI Whisper to transcribe `voice` to text
+    user_input = "Voice input received (transcription to be implemented)"
+else:
+    user_input = st.chat_input("Say something…")
 
 if user_input:
     with st.chat_message("user"):
