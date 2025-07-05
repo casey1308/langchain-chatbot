@@ -13,25 +13,29 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
-from langchain.utilities import SerpAPIWrapper
+from langchain_community.tools.tavily_search import TavilySearchResults
 
 # Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
+tavily_api_key = os.getenv("TAVILY_API_KEY")
 
 if not openai_api_key:
-    st.error("❌ OPENAI_API_KEY not found. Please set it in a .env file.")
+    st.error("❌ OPENAI_API_KEY not found in .env")
+    st.stop()
+if not tavily_api_key:
+    st.error("❌ TAVILY_API_KEY not found in .env")
     st.stop()
 
-# 🌐 Web Search (Safe & Stable)
+# 🌐 Web Search using Tavily
 def run_web_search(query: str) -> str:
     try:
-        search = SerpAPIWrapper()
+        search = TavilySearchResults()
         return search.run(query)
     except Exception as e:
         return f"🌐 Web search failed: {str(e)}"
 
-# 📄 Build RAG chain from uploaded PDF
+# 📄 Build QA chain from PDF
 def build_qa_chain(uploaded_file) -> RetrievalQA:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(uploaded_file.read())
@@ -64,7 +68,7 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     return qa_chain
 
-# 🧠 Streamlit Interface
+# 🧠 Streamlit UI
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI VC Assistant")
 
@@ -80,12 +84,12 @@ if uploaded_file is not None:
 with st.chat_message("ai"):
     st.markdown("Hi! I'm **Manna**, your AI VC evaluator. Upload a deck or ask me anything.")
 
-# 🎙️ Optional voice upload
+# 🎙️ Voice upload
 st.subheader("🎙️ Speak to Manna")
-audio_file = st.file_uploader("Upload your question (WAV only)", type=["wav"])
+audio_file = st.file_uploader("Upload your voice (WAV only)", type=["wav"])
 if audio_file:
     st.audio(audio_file, format='audio/wav')
-    with st.spinner("Transcribing your question…"):
+    with st.spinner("Transcribing…"):
         try:
             audio_io = BytesIO(audio_file.read())
             response = openai.Audio.transcribe(
@@ -102,9 +106,9 @@ if audio_file:
             st.error(f"Transcription failed: {str(e)}")
             user_input = None
 else:
-    user_input = st.chat_input("💬 Ask a question")
+    user_input = st.chat_input("💬 Ask something…")
 
-# 💬 Respond to input
+# 💬 Respond
 if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
