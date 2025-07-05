@@ -36,21 +36,23 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
     vectorstore = FAISS.from_documents(chunks, embeddings)
-system_template = (
-    "You are Manna, a friendly and expert AI assistant VC pitch deck evaluator. "
-    "You must use ONLY the structured evaluation data in the context below to generate your answer. "
-    "If the necessary data is missing, reply: 'Insufficient data to evaluate.'\n\n"
-    "Instructions:\n"
-    "1. Carefully read each evaluation criteria, its score (out of 10), and key insight.\n"
-    "2. Write a 3-line summary that reflects the strengths and risks of the opportunity.\n"
-    "3. Calculate and return the average Fit Score from all the given scores, rounded to one decimal place.\n\n"
-    "Do not answer questions outside this evaluation task.\n\n"
-    "{context}\n\n"
-    "Question: {question}"
-)
+
+    system_template = (
+        "You are Manna, a friendly and expert AI assistant VC pitch deck evaluator. "
+        "You must use ONLY the structured evaluation data in the context below to generate your answer. "
+        "If the necessary data is missing, reply: 'Insufficient data to evaluate.'\n\n"
+        "Instructions:\n"
+        "1. Carefully read each evaluation criteria, its score (out of 10), and key insight.\n"
+        "2. Write a 3-line summary that reflects the strengths and risks of the opportunity.\n"
+        "3. Calculate and return the average Fit Score from all the given scores, rounded to one decimal place.\n\n"
+        "Do not answer questions outside this evaluation task.\n\n"
+        "{context}\n\n"
+        "Question: {question}"
+    )
 
     prompt = PromptTemplate(
-        input_variables=["context", "question"], template=system_template
+        input_variables=["context", "question"],
+        template=system_template
     )
 
     qa_chain = RetrievalQA.from_chain_type(
@@ -60,6 +62,7 @@ system_template = (
     )
 
     return qa_chain
+
 
 # UI Setup
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
