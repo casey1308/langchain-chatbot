@@ -4,7 +4,6 @@ import tempfile
 from dotenv import load_dotenv
 import openai
 from io import BytesIO
-import requests
 
 # LangChain and OpenAI
 from langchain_openai import ChatOpenAI
@@ -17,17 +16,15 @@ from langchain.chains import RetrievalQA
 from langchain.utilities import SerpAPIWrapper
 from langchain.agents import initialize_agent, Tool, AgentType
 
-# Load environment variables
+# Load API keys from .env
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
-SERPAPI_API_KEY=20c2139054e5f0f80d6571e8f09229f5d037bcc1e09bb51673394d5776850291
-
 
 if not openai_api_key:
     st.error("❌ OPENAI_API_KEY not found. Please set it in a .env file.")
     st.stop()
 
-# Build RAG Chain
+# 📌 Build RAG QA Chain
 def build_qa_chain(uploaded_file) -> RetrievalQA:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(uploaded_file.read())
@@ -68,27 +65,23 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     return qa_chain
 
-# Web search fallback using SerpAPI
+# 🌐 Web Search Agent using SerpAPI
 def build_web_search_agent():
-  search = SerpAPIWrapper()
-
-
+    search = SerpAPIWrapper()  # reads SERPAPI_API_KEY from .env
     search_tool = Tool(
         name="Web Search",
         func=search.run,
-        description="Use this to answer general questions from the internet."
+        description="Search the internet for current info about startups, founders, or companies."
     )
-
     agent = initialize_agent(
         tools=[search_tool],
         llm=ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key),
         agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
         verbose=False
     )
-
     return agent
 
-# UI Setup
+# 🖥️ Streamlit UI
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI Chat Assistant")
 
@@ -98,24 +91,24 @@ if "qa_chain" not in st.session_state:
 if "web_agent" not in st.session_state:
     st.session_state.web_agent = build_web_search_agent()
 
-uploaded_file = st.file_uploader("📄 Upload a PDF to chat with it", type=["pdf"])
+uploaded_file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
 
 if uploaded_file is not None:
-    with st.spinner("Indexing your document…"):
+    with st.spinner("📚 Reading and indexing your pitch deck…"):
         st.session_state.qa_chain = build_qa_chain(uploaded_file)
-    st.success("✅ Document indexed! Ask your questions below.")
+    st.success("✅ Document processed! Ask Manna anything about it below.")
 
 with st.chat_message("ai"):
-    st.markdown("Hi there! I'm **Manna**, your helpful AI assistant. Ask me anything!")
+    st.markdown("Hi! I'm **Manna**, your AI VC analyst. Ask me anything about the pitch or the web!")
 
-# Voice input section using audio file upload + Whisper
+# 🎙️ Voice input with Whisper
 st.subheader("🎙️ Speak to Manna (Upload Your Voice)")
 
-audio_file = st.file_uploader("Upload a WAV audio file to transcribe and ask", type=["wav"])
+audio_file = st.file_uploader("Upload a WAV audio file", type=["wav"])
 
 if audio_file:
     st.audio(audio_file, format='audio/wav')
-    with st.spinner("🔍 Transcribing your voice with Whisper..."):
+    with st.spinner("🧠 Transcribing your voice using Whisper..."):
         try:
             audio_bytes = audio_file.read()
             audio_io = BytesIO(audio_bytes)
@@ -134,9 +127,9 @@ if audio_file:
             st.error(f"❌ Transcription failed: {str(e)}")
             user_input = None
 else:
-    user_input = st.chat_input("💬 Ask me something…")
+    user_input = st.chat_input("💬 Ask Manna anything...")
 
-# Handle user input from chat or audio
+# 💬 Process input and respond
 if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
@@ -145,11 +138,12 @@ if user_input:
         if st.session_state.qa_chain is not None:
             answer = st.session_state.qa_chain.run(user_input)
             if "Insufficient data" in answer or answer.strip() == "":
-                raise ValueError("Fallback to web")
+                raise ValueError("Fallback to web search")
         else:
-            raise ValueError("No PDF context")
+            raise ValueError("No PDF loaded")
+
     except:
-        with st.spinner("📡 Searching the web..."):
+        with st.spinner("🌐 Searching the internet..."):
             answer = st.session_state.web_agent.run(user_input)
 
     with st.chat_message("ai"):
