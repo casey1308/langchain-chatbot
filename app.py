@@ -36,13 +36,18 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
     vectorstore = FAISS.from_documents(chunks, embeddings)
-
-    system_template = (
-        "You are Manna, a friendly and helpful AI assistant. "
-        "Use ONLY the following context to answer the user. If the answer "
-        "is not in the context, say you don’t know."
-        "\n\n{context}\n\nQuestion: {question}"
-    )
+system_template = (
+    "You are Manna, a friendly and expert AI assistant VC pitch deck evaluator. "
+    "You must use ONLY the structured evaluation data in the context below to generate your answer. "
+    "If the necessary data is missing, reply: 'Insufficient data to evaluate.'\n\n"
+    "Instructions:\n"
+    "1. Carefully read each evaluation criteria, its score (out of 10), and key insight.\n"
+    "2. Write a 3-line summary that reflects the strengths and risks of the opportunity.\n"
+    "3. Calculate and return the average Fit Score from all the given scores, rounded to one decimal place.\n\n"
+    "Do not answer questions outside this evaluation task.\n\n"
+    "{context}\n\n"
+    "Question: {question}"
+)
 
     prompt = PromptTemplate(
         input_variables=["context", "question"], template=system_template
