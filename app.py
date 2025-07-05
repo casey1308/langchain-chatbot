@@ -6,7 +6,7 @@ import openai
 from io import BytesIO
 import re
 
-# LangChain core components
+# LangChain components
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
@@ -16,7 +16,7 @@ from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 
-# 🌱 Load keys
+# Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 tavily_api_key = os.getenv("TAVILY_API_KEY")
@@ -25,29 +25,35 @@ if not openai_api_key or not tavily_api_key:
     st.error("❌ Please set both OPENAI_API_KEY and TAVILY_API_KEY in your .env file.")
     st.stop()
 
-# 🧹 Fix Tavily's content formatting
+# Clean up Tavily content
 def clean_text(text: str) -> str:
-    text = re.sub(r"(\w)\n(\w)", r"\1\2", text)  # Collapse broken words
-    text = re.sub(r"\n{2,}", "\n", text)  # Reduce multiple newlines
+    text = re.sub(r"(\w)\n(\w)", r"\1\2", text)  # collapse broken words
+    text = re.sub(r"\n{2,}", "\n", text)
     return text.strip()
 
-# 🌐 Web Search via Tavily
+# 🌐 Tavily Web Search
 def run_web_search(query: str) -> str:
     try:
         search = TavilySearchAPIWrapper()
-        raw = search.run(query)  # returns string summary
-        return clean_text(raw)
+        results = search.results(query=query, max_results=3)
+        if not results:
+            return "🌐 No results found."
+        output = ""
+        for idx, r in enumerate(results[:3], 1):
+            output += f"🔗 **{r['title']}**\n[{r['url']}]\n\n{clean_text(r['content'][:300])}...\n\n"
+        return output.strip()
     except Exception as e:
         return f"🌐 Web search failed: {str(e)}"
 
-# 📄 RAG Chain
+# 📄 VC Deck RAG
 def build_qa_chain(uploaded_file) -> RetrievalQA:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(uploaded_file.read())
         pdf_path = tmp.name
 
     documents = PyPDFLoader(pdf_path).load()
-    chunks = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50).split_documents(documents)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    chunks = splitter.split_documents(documents)
     embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
     vectorstore = FAISS.from_documents(chunks, embeddings)
 
@@ -72,26 +78,26 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
 # 🧠 Streamlit Interface
 st.set_page_config(page_title="Manna - Your AI VC Assistant", page_icon="🤖")
-st.title("🤖 Meet Manna - Your AI VC Assistant")
+st.title("🤖 Meet Manna - Your AI VC Evaluator")
 
 if "qa_chain" not in st.session_state:
     st.session_state.qa_chain = None
 
 uploaded_file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
 if uploaded_file is not None:
-    with st.spinner("Reading and indexing your pitch deck…"):
+    with st.spinner("🔍 Reading and indexing your pitch deck…"):
         st.session_state.qa_chain = build_qa_chain(uploaded_file)
     st.success("✅ Pitch deck processed! Ask Manna anything below.")
 
 with st.chat_message("ai"):
-    st.markdown("Hi! I'm **Manna**, your AI VC evaluator. Upload a deck or ask me anything.")
+    st.markdown("Hi! I'm **Manna**, your AI VC assistant. Upload a deck or ask anything.")
 
-# 🎙️ Voice input
+# 🎙️ Voice upload
 st.subheader("🎙️ Speak to Manna")
-audio_file = st.file_uploader("Upload your voice (WAV only)", type=["wav"])
+audio_file = st.file_uploader("Upload a WAV file (your voice)", type=["wav"])
 if audio_file:
     st.audio(audio_file, format='audio/wav')
-    with st.spinner("Transcribing…"):
+    with st.spinner("🗣️ Transcribing..."):
         try:
             audio_io = BytesIO(audio_file.read())
             response = openai.Audio.transcribe(
@@ -100,17 +106,17 @@ if audio_file:
                 api_key=openai_api_key,
                 response_format="json",
                 language="auto",
-                prompt="Translate into English if needed."
+                prompt="Translate to English if needed."
             )
             user_input = response["text"]
-            st.success(f"🗣️ You said: **{user_input}**")
+            st.success(f"✅ Transcribed: **{user_input}**")
         except Exception as e:
-            st.error(f"Transcription failed: {str(e)}")
+            st.error(f"❌ Transcription failed: {str(e)}")
             user_input = None
 else:
-    user_input = st.chat_input("💬 Ask something…")
+    user_input = st.chat_input("💬 Ask your question here")
 
-# 💬 Main Answer Logic
+# 🧠 Main Answer Logic
 if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
@@ -119,9 +125,9 @@ if user_input:
         if st.session_state.qa_chain:
             answer = st.session_state.qa_chain.run(user_input)
             if "Insufficient data" in answer or not answer.strip():
-                raise ValueError("fallback")
+                raise ValueError("Fallback")
         else:
-            raise ValueError("no chain")
+            raise ValueError("No PDF uploaded")
     except:
         with st.spinner("🌐 Not enough info in deck. Searching the web..."):
             answer = run_web_search(user_input)
