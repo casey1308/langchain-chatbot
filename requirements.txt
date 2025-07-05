@@ -5,3 +5,4 @@ python-dotenv
 streamlit_js_eval
 langchain-community
 langchain-openai
+google-search-results
