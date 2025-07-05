@@ -20,7 +20,8 @@ from langchain.agents import initialize_agent, Tool, AgentType
 # Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
-serpapi_api_key = "20c2139054e5f0f80d6571e8f09229f5d037bcc1e09bb51673394d5776850291"  # Hardcoded
+SERPAPI_API_KEY=20c2139054e5f0f80d6571e8f09229f5d037bcc1e09bb51673394d5776850291
+
 
 if not openai_api_key:
     st.error("❌ OPENAI_API_KEY not found. Please set it in a .env file.")
@@ -69,7 +70,8 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
 # Web search fallback using SerpAPI
 def build_web_search_agent():
-    search = SerpAPIWrapper(serpapi_api_key=serpapi_api_key)
+  search = SerpAPIWrapper()
+
 
     search_tool = Tool(
         name="Web Search",
