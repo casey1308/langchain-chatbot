@@ -6,7 +6,7 @@ import openai
 from io import BytesIO
 import re
 
-# LangChain components
+# LangChain core components
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
@@ -14,50 +14,40 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
-from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 
-# Load environment variables
+# 🌱 Load keys
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 
 if not openai_api_key or not tavily_api_key:
-    st.error("❌ OPENAI_API_KEY or TAVILY_API_KEY missing from .env")
+    st.error("❌ Please set both OPENAI_API_KEY and TAVILY_API_KEY in your .env file.")
     st.stop()
 
-# 🔍 Web Search with cleaning
-def clean_search_text(text: str) -> str:
-    # Remove single-character vertical splits like "R\ne\nv\ne\nn\nu\ne"
-    cleaned = re.sub(r"(\w)\n(\w)", r"\1\2", text)
-    # Remove excessive newlines
-    cleaned = re.sub(r"\n{2,}", "\n", cleaned)
-    return cleaned
+# 🧹 Fix Tavily's content formatting
+def clean_text(text: str) -> str:
+    text = re.sub(r"(\w)\n(\w)", r"\1\2", text)  # Collapse broken words
+    text = re.sub(r"\n{2,}", "\n", text)  # Reduce multiple newlines
+    return text.strip()
 
+# 🌐 Web Search via Tavily
 def run_web_search(query: str) -> str:
     try:
-        search = TavilySearchResults()
-        results = search.results(query)
-        if not results.get("results"):
-            return "🌐 No relevant web results found."
-        top = results["results"][:3]
-        formatted = []
-        for r in top:
-            title = r.get("title", "Untitled")
-            url = r.get("url", "#")
-            content = clean_search_text(r.get("content", ""))[:300].strip()
-            formatted.append(f"### 🔗 [{title}]({url})\n{content}...")
-        return "\n\n".join(formatted)
+        search = TavilySearchAPIWrapper()
+        raw = search.run(query)  # returns string summary
+        return clean_text(raw)
     except Exception as e:
         return f"🌐 Web search failed: {str(e)}"
 
-# 📄 Build PDF QA Chain
+# 📄 RAG Chain
 def build_qa_chain(uploaded_file) -> RetrievalQA:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(uploaded_file.read())
         pdf_path = tmp.name
 
-    docs = PyPDFLoader(pdf_path).load()
-    chunks = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50).split_documents(docs)
+    documents = PyPDFLoader(pdf_path).load()
+    chunks = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50).split_documents(documents)
     embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
     vectorstore = FAISS.from_documents(chunks, embeddings)
 
@@ -74,15 +64,14 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     prompt = PromptTemplate(input_variables=["context", "question"], template=system_template)
 
-    qa_chain = RetrievalQA.from_chain_type(
+    return RetrievalQA.from_chain_type(
         llm=ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key),
         retriever=vectorstore.as_retriever(),
         chain_type_kwargs={"prompt": prompt},
     )
-    return qa_chain
 
-# 🧠 Streamlit UI
-st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
+# 🧠 Streamlit Interface
+st.set_page_config(page_title="Manna - Your AI VC Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI VC Assistant")
 
 if "qa_chain" not in st.session_state:
@@ -121,7 +110,7 @@ if audio_file:
 else:
     user_input = st.chat_input("💬 Ask something…")
 
-# 💬 Handle chat input
+# 💬 Main Answer Logic
 if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
@@ -129,12 +118,12 @@ if user_input:
     try:
         if st.session_state.qa_chain:
             answer = st.session_state.qa_chain.run(user_input)
-            if "Insufficient data" in answer or answer.strip() == "":
-                raise ValueError("Fallback to web")
+            if "Insufficient data" in answer or not answer.strip():
+                raise ValueError("fallback")
         else:
-            raise ValueError("No PDF")
+            raise ValueError("no chain")
     except:
-        with st.spinner("🌐 Searching the web..."):
+        with st.spinner("🌐 Not enough info in deck. Searching the web..."):
             answer = run_web_search(user_input)
 
     with st.chat_message("ai"):
