@@ -14,7 +14,6 @@ from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain.utilities import SerpAPIWrapper
-from langchain.agents import initialize_agent, Tool, AgentType
 
 # Load environment variables
 load_dotenv()
@@ -24,21 +23,13 @@ if not openai_api_key:
     st.error("❌ OPENAI_API_KEY not found. Please set it in a .env file.")
     st.stop()
 
-# 🔍 Build web search fallback agent
-def build_web_search_agent():
-    search = SerpAPIWrapper()  # uses SERPAPI_API_KEY from .env
-    tool = Tool(
-        name="Web Search",
-        func=search.run,
-        description="Search the internet for real-time info"
-    )
-    agent = initialize_agent(
-        tools=[tool],
-        llm=ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key),
-        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-        verbose=False
-    )
-    return agent
+# 🌐 Web Search (Safe & Stable)
+def run_web_search(query: str) -> str:
+    try:
+        search = SerpAPIWrapper()
+        return search.run(query)
+    except Exception as e:
+        return f"🌐 Web search failed: {str(e)}"
 
 # 📄 Build RAG chain from uploaded PDF
 def build_qa_chain(uploaded_file) -> RetrievalQA:
@@ -79,8 +70,6 @@ st.title("🤖 Meet Manna - Your AI VC Assistant")
 
 if "qa_chain" not in st.session_state:
     st.session_state.qa_chain = None
-if "web_agent" not in st.session_state:
-    st.session_state.web_agent = build_web_search_agent()
 
 uploaded_file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
 if uploaded_file is not None:
@@ -129,7 +118,7 @@ if user_input:
             raise ValueError("No PDF uploaded")
     except:
         with st.spinner("🌐 Searching the web..."):
-            answer = st.session_state.web_agent.run(user_input)
+            answer = run_web_search(user_input)
 
     with st.chat_message("ai"):
         st.markdown(answer)
