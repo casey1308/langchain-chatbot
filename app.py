@@ -4,10 +4,11 @@ import tempfile
 from dotenv import load_dotenv
 import openai
 from io import BytesIO
+import re
 
 # LangChain components
 from langchain_openai import ChatOpenAI
-from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -20,30 +21,43 @@ load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 
-if not openai_api_key:
-    st.error("❌ OPENAI_API_KEY not found in .env")
-    st.stop()
-if not tavily_api_key:
-    st.error("❌ TAVILY_API_KEY not found in .env")
+if not openai_api_key or not tavily_api_key:
+    st.error("❌ OPENAI_API_KEY or TAVILY_API_KEY missing from .env")
     st.stop()
 
-# 🌐 Web Search using Tavily
+# 🔍 Web Search with cleaning
+def clean_search_text(text: str) -> str:
+    # Remove single-character vertical splits like "R\ne\nv\ne\nn\nu\ne"
+    cleaned = re.sub(r"(\w)\n(\w)", r"\1\2", text)
+    # Remove excessive newlines
+    cleaned = re.sub(r"\n{2,}", "\n", cleaned)
+    return cleaned
+
 def run_web_search(query: str) -> str:
     try:
         search = TavilySearchResults()
-        return search.run(query)
+        results = search.results(query)
+        if not results.get("results"):
+            return "🌐 No relevant web results found."
+        top = results["results"][:3]
+        formatted = []
+        for r in top:
+            title = r.get("title", "Untitled")
+            url = r.get("url", "#")
+            content = clean_search_text(r.get("content", ""))[:300].strip()
+            formatted.append(f"### 🔗 [{title}]({url})\n{content}...")
+        return "\n\n".join(formatted)
     except Exception as e:
         return f"🌐 Web search failed: {str(e)}"
 
-# 📄 Build QA chain from PDF
+# 📄 Build PDF QA Chain
 def build_qa_chain(uploaded_file) -> RetrievalQA:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(uploaded_file.read())
         pdf_path = tmp.name
 
-    documents = PyPDFLoader(pdf_path).load()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    chunks = splitter.split_documents(documents)
+    docs = PyPDFLoader(pdf_path).load()
+    chunks = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50).split_documents(docs)
     embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
     vectorstore = FAISS.from_documents(chunks, embeddings)
 
@@ -65,7 +79,6 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
         retriever=vectorstore.as_retriever(),
         chain_type_kwargs={"prompt": prompt},
     )
-
     return qa_chain
 
 # 🧠 Streamlit UI
@@ -84,7 +97,7 @@ if uploaded_file is not None:
 with st.chat_message("ai"):
     st.markdown("Hi! I'm **Manna**, your AI VC evaluator. Upload a deck or ask me anything.")
 
-# 🎙️ Voice upload
+# 🎙️ Voice input
 st.subheader("🎙️ Speak to Manna")
 audio_file = st.file_uploader("Upload your voice (WAV only)", type=["wav"])
 if audio_file:
@@ -108,7 +121,7 @@ if audio_file:
 else:
     user_input = st.chat_input("💬 Ask something…")
 
-# 💬 Respond
+# 💬 Handle chat input
 if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
@@ -117,9 +130,9 @@ if user_input:
         if st.session_state.qa_chain:
             answer = st.session_state.qa_chain.run(user_input)
             if "Insufficient data" in answer or answer.strip() == "":
-                raise ValueError("Fallback to web search")
+                raise ValueError("Fallback to web")
         else:
-            raise ValueError("No PDF uploaded")
+            raise ValueError("No PDF")
     except:
         with st.spinner("🌐 Searching the web..."):
             answer = run_web_search(user_input)
