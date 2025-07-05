@@ -4,6 +4,7 @@ import tempfile
 from dotenv import load_dotenv
 import openai
 from io import BytesIO
+import requests
 
 # LangChain and OpenAI
 from langchain_openai import ChatOpenAI
@@ -13,10 +14,13 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
 from langchain.chains import RetrievalQA
+from langchain.utilities import SerpAPIWrapper
+from langchain.agents import initialize_agent, Tool, AgentType
 
 # Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
+serpapi_api_key = "20c2139054e5f0f80d6571e8f09229f5d037bcc1e09bb51673394d5776850291"  # Hardcoded
 
 if not openai_api_key:
     st.error("❌ OPENAI_API_KEY not found. Please set it in a .env file.")
@@ -63,6 +67,24 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
 
     return qa_chain
 
+# Web search fallback using SerpAPI
+def build_web_search_agent():
+    search = SerpAPIWrapper(serpapi_api_key=serpapi_api_key)
+
+    search_tool = Tool(
+        name="Web Search",
+        func=search.run,
+        description="Use this to answer general questions from the internet."
+    )
+
+    agent = initialize_agent(
+        tools=[search_tool],
+        llm=ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key),
+        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+        verbose=False
+    )
+
+    return agent
 
 # UI Setup
 st.set_page_config(page_title="Manna - Your AI Assistant", page_icon="🤖")
@@ -70,6 +92,9 @@ st.title("🤖 Meet Manna - Your AI Chat Assistant")
 
 if "qa_chain" not in st.session_state:
     st.session_state.qa_chain = None
+
+if "web_agent" not in st.session_state:
+    st.session_state.web_agent = build_web_search_agent()
 
 uploaded_file = st.file_uploader("📄 Upload a PDF to chat with it", type=["pdf"])
 
@@ -98,7 +123,7 @@ if audio_file:
                 file=audio_io,
                 api_key=openai_api_key,
                 response_format="json",
-                language="auto",  # Auto-detect
+                language="auto",
                 prompt="Translate into English if needed."
             )
             user_input = response["text"]
@@ -114,15 +139,16 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    if st.session_state.qa_chain is not None:
-        answer = st.session_state.qa_chain.run(user_input)
-    else:
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are Manna, a friendly and helpful AI assistant."),
-            ("human", "{input}")
-        ])
-        chain = prompt | ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
-        answer = chain.invoke({"input": user_input}).content
+    try:
+        if st.session_state.qa_chain is not None:
+            answer = st.session_state.qa_chain.run(user_input)
+            if "Insufficient data" in answer or answer.strip() == "":
+                raise ValueError("Fallback to web")
+        else:
+            raise ValueError("No PDF context")
+    except:
+        with st.spinner("📡 Searching the web..."):
+            answer = st.session_state.web_agent.run(user_input)
 
     with st.chat_message("ai"):
         st.markdown(answer)
