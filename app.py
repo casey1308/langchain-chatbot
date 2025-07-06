@@ -42,6 +42,10 @@ def clean_text(text: str) -> str:
     text = re.sub(r"\n{2,}", "\n", text)
     return text.strip()
 
+# Clean assistant prefix "Manna:" from model output
+def clean_assistant_prefix(text: str) -> str:
+    return re.sub(r"^Manna:\s*", "", text.strip(), flags=re.IGNORECASE)
+
 # PDF text extractor
 def extract_pdf_text(file_bytes: bytes) -> str:
     reader = PyPDF2.PdfReader(BytesIO(file_bytes))
@@ -104,7 +108,8 @@ def evaluate_pitch(sections: dict) -> str:
     for crit in criteria:
         matched_text = match_section(crit, sections)
         prompt += f"\n## {crit}\n{matched_text}\n"
-    return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
+    result = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
+    return clean_assistant_prefix(result)
 
 # Evaluate resume
 def evaluate_resume(sections: dict) -> str:
@@ -116,7 +121,8 @@ def evaluate_resume(sections: dict) -> str:
     )
     for sec, content in sections.items():
         prompt += f"\n## {sec.title()}\n{content}\n"
-    return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
+    result = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
+    return clean_assistant_prefix(result)
 
 # Web search via Tavily
 def run_web_search(query: str, format_type: str = "summary") -> str:
@@ -134,7 +140,8 @@ Web Results:
 
 Query: {query}
 """
-        return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
+        result = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
+        return clean_assistant_prefix(result)
     except Exception as e:
         return f"🌐 Web search failed: {str(e)}"
 
@@ -153,7 +160,8 @@ Document Context:
 User Question:
 {query}
 """
-    return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
+    result = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
+    return clean_assistant_prefix(result)
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Manna - AI Deck & Resume Evaluator", page_icon="🤖")
@@ -199,6 +207,8 @@ if user_input:
         answer = answer_chat(user_query, context=st.session_state.parsed_doc)
     else:
         answer = answer_chat(user_query)
+
+    answer = clean_assistant_prefix(answer)
 
     st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     save_history()
