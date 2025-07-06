@@ -7,3 +7,4 @@ langchain-community
 langchain-openai
 tavily-python
 pypdf
+faiss-cpu
