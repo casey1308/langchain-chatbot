@@ -156,22 +156,24 @@ body {
     background-color: #0f0f0f;
     color: white;
 }
-.stChatMessage.user {
+.stChatMessage.user, .user-bubble {
     background-color: #202020;
     color: white;
     padding: 12px;
     border-radius: 16px;
     margin: 10px 0;
-    width: 70%;
+    width: fit-content;
+    max-width: 75%;
 }
-.stChatMessage.assistant {
+.stChatMessage.assistant, .assistant-bubble {
     background-color: #2c2c4a;
     color: white;
     padding: 12px;
     border-radius: 16px;
     margin: 10px 0;
     margin-left: auto;
-    width: 70%;
+    width: fit-content;
+    max-width: 75%;
 }
 [data-testid="stChatInput"] {
     background: #222;
@@ -198,28 +200,32 @@ if user_input:
     is_web = user_input.lower().startswith("search web:")
     query = user_input[len("search web:"):].strip() if is_web else user_input
 
-    if not st.session_state.file_uploaded:
-        answer = answer_chat(query)
-    elif fmt == "trend_table":
-        answer = generate_trend_score_table()
-    elif is_web:
-        answer = run_web_search(query, fmt)
-    else:
-        keywords = ["revenue", "ebitda", "market size", "ask", "funding", "founder"]
-        if any(k in query.lower() for k in keywords):
-            metrics = extract_metrics(st.session_state.parsed_doc)
-            answer = "\n".join([f"- **{k.replace('_',' ').title()}**: {metrics.get(k, '❌ Not found')}" for k in metrics])
-        elif query.lower().strip() in ["evaluate this pitch", "score pitch"]:
-            answer = evaluate_pitch(st.session_state.sections)
-        elif query.lower().strip() in ["evaluate this resume", "score resume"]:
-            answer = evaluate_resume(st.session_state.sections)
+    with st.spinner("🤖 Thinking..."):
+        if not st.session_state.file_uploaded:
+            answer = answer_chat(query)
+        elif fmt == "trend_table":
+            answer = generate_trend_score_table()
+        elif is_web:
+            answer = run_web_search(query, fmt)
         else:
-            answer = answer_chat(query, context=st.session_state.parsed_doc)
+            keywords = ["revenue", "ebitda", "market size", "ask", "funding", "founder"]
+            if any(k in query.lower() for k in keywords):
+                metrics = extract_metrics(st.session_state.parsed_doc)
+                if any(metrics.values()):
+                    answer = "\n".join([f"- **{k.replace('_',' ').title()}**: {metrics.get(k, '❌ Not found')}" for k in ["revenue", "ebitda", "market_size", "funding_ask", "founder_name"]])
+                else:
+                    answer = "😕 I couldn't find any financial metrics in the document."
+            elif query.lower().strip() in ["evaluate this pitch", "score pitch"]:
+                answer = evaluate_pitch(st.session_state.sections)
+            elif query.lower().strip() in ["evaluate this resume", "score resume"]:
+                answer = evaluate_resume(st.session_state.sections)
+            else:
+                answer = answer_chat(query, context=st.session_state.parsed_doc)
 
     st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     save_history()
 
 # Render chat
 for user, bot, ts in st.session_state.chat_history:
-    st.markdown(f'<div class="stChatMessage user">🧍‍♂️ {user}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="stChatMessage assistant">🤖 {bot}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="user-bubble">🧍‍♂️ {user}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="assistant-bubble">🤖 {bot}</div>', unsafe_allow_html=True)
