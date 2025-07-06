@@ -9,3 +9,4 @@ tavily-python
 pypdf
 faiss-cpu
 PyPDF2
+streamlit-chat
