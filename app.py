@@ -8,6 +8,7 @@ import re
 from io import BytesIO
 from datetime import datetime
 import json
+from difflib import get_close_matches
 
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
@@ -27,6 +28,8 @@ if "parsed_doc" not in st.session_state:
     st.session_state.parsed_doc = None
 if "file_uploaded" not in st.session_state:
     st.session_state.file_uploaded = False
+if "sections" not in st.session_state:
+    st.session_state.sections = {}
 
 # Save chat history to file
 def save_history():
@@ -61,6 +64,15 @@ def split_into_sections(text: str) -> dict:
         sections.setdefault(current, []).append(l)
     return {k: "\n".join(v) for k, v in sections.items()}
 
+# Match closest section
+def match_section(key, sections):
+    matches = get_close_matches(key.lower(), [k.lower() for k in sections.keys()], n=1, cutoff=0.4)
+    if matches:
+        for k in sections:
+            if k.lower() == matches[0]:
+                return sections[k]
+    return "Not mentioned"
+
 # Format inference
 def infer_format(query: str) -> str:
     query = query.lower()
@@ -90,7 +102,8 @@ def evaluate_pitch(sections: dict) -> str:
         "Return markdown table: Criterion | Score | Notes | Suggestion.\n\n"
     )
     for crit in criteria:
-        prompt += f"\n## {crit}\n{sections.get(crit.lower(), 'Not mentioned')}\n"
+        matched_text = match_section(crit, sections)
+        prompt += f"\n## {crit}\n{matched_text}\n"
     return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
 
 # Evaluate resume
@@ -166,7 +179,6 @@ if file:
     st.session_state.chat_history.append(("Evaluate this file", eval_result, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     save_history()
 
-# 🔍 Chat input
 st.divider()
 user_input = st.chat_input("💬 Ask Manna anything (e.g. 'What traction is mentioned?' or 'search web: Nvidia news')")
 
@@ -175,7 +187,11 @@ if user_input:
     is_web = user_input.lower().startswith("search web:")
     user_query = user_input[len("search web:"):].strip() if is_web else user_input
 
-    if is_web:
+    if user_query.lower().strip() in ["evaluate this pitch", "re-evaluate pitch", "score pitch"]:
+        answer = evaluate_pitch(st.session_state.sections)
+    elif user_query.lower().strip() in ["evaluate this resume", "re-evaluate resume", "score resume"]:
+        answer = evaluate_resume(st.session_state.sections)
+    elif is_web:
         answer = run_web_search(user_query, format_type)
     elif st.session_state.file_uploaded and st.session_state.parsed_doc:
         answer = answer_chat(user_query, context=st.session_state.parsed_doc)
@@ -210,10 +226,4 @@ for q, a, t in st.session_state.chat_history:
         <div><b>🤖 Manna:</b> {a}</div>
     </div>
     """, unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# 🧼 Clear chat
-if st.button("🗑️ Clear Chat History"):
-    st.session_state.chat_history = []
-    save_history()
-    st.rerun()
+st.markdown('</div>', unsafe_allo
