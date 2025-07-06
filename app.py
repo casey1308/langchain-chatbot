@@ -44,7 +44,7 @@ def run_web_search(query: str, format_type="summary") -> str:
             return "🌐 No results found."
 
         combined = "\n\n".join(
-            f"{r['title']}:\n{clean_text(r['content'][:800])}" for r in results if r.get("content")
+            f"{r['title']}\n{clean_text(r['content'][:800])}" for r in results if r.get("content")
         )
         history = "\n\n".join(
             f"User: {u}\nManna: {a}" for u, a in st.session_state.chat_history[-5:]
@@ -129,6 +129,8 @@ Pitch Deck Text:
     return resp.content
 
 # General GPT chat with memory
+from streamlit_chat import message
+
 def answer_with_openai(query: str) -> str:
     try:
         history_context = "\n\n".join(
@@ -170,10 +172,10 @@ if uploaded_file:
     st.success("✅ File uploaded successfully")
 
 # Chat input
-user_input = st.text_input("💬 Ask something about your file or just use GPT")
+user_input = st.chat_input("💬 Ask something about your file or just use GPT")
 
 if user_input:
-    st.markdown(f"**You:** {user_input}")
+    st.session_state.chat_history.append((user_input, ""))
     fmt = infer_format_from_query(user_input)
     answer = None
 
@@ -190,7 +192,10 @@ if user_input:
     else:
         answer = answer_with_openai(user_input)
 
-    if answer:
-        st.markdown("**Manna:**")
-        st.markdown(answer)
-        st.session_state.chat_history.append((user_input, answer))
+    st.session_state.chat_history[-1] = (user_input, answer)
+
+# Display chat
+for i, (q, a) in enumerate(st.session_state.chat_history):
+    message(q, is_user=True, key=f"user_{i}")
+    if a:
+        message(a, is_user=False, key=f"bot_{i}")
