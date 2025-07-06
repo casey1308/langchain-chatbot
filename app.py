@@ -36,6 +36,7 @@ def save_history():
         json.dump(st.session_state.chat_history, f, indent=2)
 
 # Clean text
+
 def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     text = re.sub(r"\n{2,}", "\n", text)
@@ -165,21 +166,24 @@ User Question:
 # --- Streamlit UI ---
 st.set_page_config(page_title="Manna - AI Deck & Resume Evaluator", page_icon="🤖")
 st.markdown("""
-<style>
-body {
-    background: linear-gradient(to right, #1f1c2c, #928dab);
-    color: white;
-}
-[data-testid="stChatMessage"] div {
-    background-color: #2e2e3e;
-    border-radius: 12px;
-    padding: 1rem;
-    margin: 0.5rem 0;
-}
-[data-testid="stChatMessage"] span {
-    color: white !important;
-}
-</style>
+    <style>
+        body {
+            background: #0f0f0f;
+            color: white;
+        }
+        [data-testid="stChatMessage"] div {
+            background-color: #2a2a2a;
+            border-radius: 12px;
+            padding: 1rem;
+            margin: 0.5rem 0;
+        }
+        [data-testid="stChatMessage"] span {
+            color: white !important;
+        }
+        .block-container {
+            padding: 2rem 2rem 5rem;
+        }
+    </style>
 """, unsafe_allow_html=True)
 
 st.title("🤖 Manna: Resume & Pitch Deck Evaluator")
@@ -233,7 +237,6 @@ if user_input:
     with st.chat_message("assistant"):
         st.markdown(answer)
 
-# Session display
 if st.session_state.chat_history:
     st.markdown("---")
     st.markdown("### 🧵 Chat History")
