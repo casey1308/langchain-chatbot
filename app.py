@@ -31,16 +31,33 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 # Tavily Search
-def run_web_search(query: str) -> str:
+def run_web_search(query: str, format_type="summary") -> str:
     try:
         search = TavilySearchAPIWrapper()
         results = search.results(query=query, max_results=3)
         if not results:
             return "🌐 No results found."
-        output = ""
-        for idx, r in enumerate(results[:3], 1):
-            output += f"🔗 **{r['title']}**\n[{r['url']}]\n\n{clean_text(r['content'][:300])}...\n\n"
-        return output.strip()
+
+        # Extract the top contents
+        combined_content = "\n\n".join(
+            f"{r['title']}:\n{clean_text(r['content'][:1000])}" for r in results if r.get("content")
+        )
+
+        system_prompt = (
+            "You are a VC research analyst. Based on the following web content, answer the user's query in a clear, structured format.\n\n"
+            "If the user asked for scoring, respond with a VC scorecard table.\n"
+            "If the user asked for hypher mapping, return bullet-style structured evaluation.\n"
+            "If the user asked for mapping, compare major dimensions in text.\n"
+            "If not specified, provide a strong summary in ~5 sentences.\n\n"
+            f"Format: {format_type}\n\n"
+            f"Web Results:\n{combined_content}\n\n"
+            f"Query: {query}"
+        )
+
+        llm = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
+        response = llm.invoke(system_prompt)
+        return response.content
+
     except Exception as e:
         return f"🌐 Web search failed: {str(e)}"
 
