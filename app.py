@@ -209,16 +209,17 @@ st.markdown("## 🧵 Chat History")
 st.markdown(
     """
     <style>
-    .scrollbox {
-      max-height: 500px;
-      overflow-y: auto;
-      border: 1px solid #ddd;
-      padding: 1rem;
-      background-color: #f9f9f9;
-      border-radius: 12px;
-      margin-bottom: 1rem;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
+   .scrollbox {
+  max-height: 500px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  padding: 1rem;
+  background-color: #f9f9f9;  /* <-- change this */
+  border-radius: 12px;
+  margin-bottom: 1rem;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
     .message {
       margin-bottom: 1rem;
       max-width: 80%;
