@@ -1,4 +1,3 @@
-""
 import streamlit as st
 import os
 import tempfile
@@ -104,6 +103,7 @@ def analyze_deck(file_bytes: bytes, format_type="table") -> str:
         "Go-To-Market Strategy",
         "Founding Team & Execution Capability",
         "Financial Viability & Funding Ask",
+        "Revenue Model, Margins, and EBITDA",
     ]
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(file_bytes)
@@ -111,15 +111,15 @@ def analyze_deck(file_bytes: bytes, format_type="table") -> str:
     pages = PyPDFLoader(pdf_path).load()
     text = "\n\n".join([p.page_content for p in pages])
     prompt = f"""
-You are a VC analyst AI reviewing a pitch deck. Evaluate it based on these criteria:
+You are a VC analyst AI reviewing a startup pitch deck. Analyze it thoroughly based on the following detailed evaluation criteria:
 {chr(10).join(f"- {c}" for c in criteria)}
 
 For each criterion:
-1. Provide a score from 0–10.
-2. Write a brief note on strengths and weaknesses.
-3. Suggest one improvement.
+1. Give a score out of 10.
+2. Provide a short analysis highlighting strengths and risks.
+3. Suggest an actionable improvement.
 
-Return as a markdown table with columns: Criterion | Score | Notes | Improvement.
+Return the output as a markdown table with the columns: Criterion | Score | Notes | Improvement.
 
 Pitch Deck Text:
 {text}
@@ -181,4 +181,3 @@ if user_input:
         st.markdown("**Manna:**")
         st.markdown(answer)
         st.session_state.chat_history.append((user_input, answer))
-""
