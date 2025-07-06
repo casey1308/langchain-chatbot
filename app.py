@@ -209,16 +209,17 @@ st.markdown("## 🧵 Chat History")
 st.markdown(
     """
     <style>
-   .scrollbox {
+.scrollbox {
   max-height: 500px;
   overflow-y: auto;
-  border: 1px solid #ddd;
+  border: 1px solid #444;      /* darker border for dark mode */
   padding: 1rem;
-  background-color: #f9f9f9;  /* <-- change this */
+  background-color: transparent;  /* or use your dark bg color, e.g. #121212 */
   border-radius: 12px;
   margin-bottom: 1rem;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
+
 
     .message {
       margin-bottom: 1rem;
