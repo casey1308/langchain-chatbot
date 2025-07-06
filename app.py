@@ -177,11 +177,22 @@ if user_input:
     st.session_state.chat_history.append((user_input, answer))
 
 # 💬 Chat thread
-st.divider()
-st.subheader("🧵 Chat Thread")
+import streamlit.components.v1 as components
 
+st.markdown("## 🧵 Conversation Thread")
 for i, (q, a) in enumerate(st.session_state.chat_history):
-    with st.container():
-        st.markdown(f"🧑‍💻 **You:** {q}", unsafe_allow_html=True)
-        st.markdown(f"🤖 **Manna:** {a}", unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div style="background-color:#f0f2f6; padding: 12px; border-radius: 10px; margin-bottom: 10px;">
+            <strong style="color:#1a1a1a;">🧑‍💻 You</strong><br/>
+            <span style="color:#333;">{q}</span>
+        </div>
+        <div style="background-color:#dbeafe; padding: 12px; border-radius: 10px; margin-bottom: 20px;">
+            <strong style="color:#1a1a1a;">🤖 Manna</strong><br/>
+            <span style="color:#111827;">{a}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
