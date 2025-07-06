@@ -9,11 +9,10 @@ from io import BytesIO
 from datetime import datetime
 import json
 from difflib import get_close_matches
-
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 
-# Load env vars
+# Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 tavily_api_key = os.getenv("TAVILY_API_KEY")
@@ -31,35 +30,29 @@ if "file_uploaded" not in st.session_state:
 if "sections" not in st.session_state:
     st.session_state.sections = {}
 
-# Save chat history to file
+# Save chat history
 def save_history():
     with open("chat_history.json", "w") as f:
         json.dump(st.session_state.chat_history, f, indent=2)
 
 # Clean text
-def clean_text(text: str) -> str:
+def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     text = re.sub(r"\n{2,}", "\n", text)
     return text.strip()
 
-# Clean assistant prefix "Manna:" from model output
-def clean_assistant_prefix(text: str) -> str:
+def clean_assistant_prefix(text):
     return re.sub(r"^Manna:\s*", "", text.strip(), flags=re.IGNORECASE)
 
-# PDF text extractor
-def extract_pdf_text(file_bytes: bytes) -> str:
+def extract_pdf_text(file_bytes):
     reader = PyPDF2.PdfReader(BytesIO(file_bytes))
     text = "\n".join(page.extract_text() or "" for page in reader.pages)
     return clean_text(text)
 
-# Section-based chunking
-def split_into_sections(text: str) -> dict:
+def split_into_sections(text):
     sections = {}
     current = "General"
-    headings = [
-        "summary", "objective", "education", "experience", "projects", "skills", "market", "team",
-        "business model", "financials", "revenue", "traction", "competition", "go-to-market", "ask", "funding"
-    ]
+    headings = ["summary", "objective", "education", "experience", "projects", "skills", "market", "team", "business model", "financials", "revenue", "traction", "competition", "go-to-market", "ask", "funding"]
     for line in text.splitlines():
         l = line.strip()
         if any(h in l.lower() for h in headings):
@@ -68,7 +61,6 @@ def split_into_sections(text: str) -> dict:
         sections.setdefault(current, []).append(l)
     return {k: "\n".join(v) for k, v in sections.items()}
 
-# Match closest section
 def match_section(key, sections):
     matches = get_close_matches(key.lower(), [k.lower() for k in sections.keys()], n=1, cutoff=0.4)
     if matches:
@@ -77,8 +69,7 @@ def match_section(key, sections):
                 return sections[k]
     return "Not mentioned"
 
-# Financial/founder metrics extractor
-def extract_metrics(doc: str) -> dict:
+def extract_metrics(doc):
     metrics = {}
     revenue_match = re.search(r"(revenue|sales)[^₹$€\d]*(₹|\$|€)?\s?([\d,.]+[MB]?)", doc, re.IGNORECASE)
     if revenue_match:
@@ -97,8 +88,7 @@ def extract_metrics(doc: str) -> dict:
         metrics["founder_name"] = founder_match.group(0).strip()
     return metrics
 
-# Format inference
-def infer_format(query: str) -> str:
+def infer_format(query):
     query = query.lower()
     if "table" in query or "score" in query:
         return "table"
@@ -108,23 +98,15 @@ def infer_format(query: str) -> str:
         return "hypher"
     return "summary"
 
-# Evaluate pitch deck
-def evaluate_pitch(sections: dict) -> str:
+def evaluate_pitch(sections):
     criteria = [
-        "Market Opportunity",
-        "Competitive Landscape",
-        "Business Model & Revenue Potential",
-        "Traction & Product Validation",
-        "Go-To-Market Strategy",
-        "Founding Team & Execution Capability",
-        "Financial Viability & Funding Ask",
+        "Market Opportunity", "Competitive Landscape", "Business Model & Revenue Potential",
+        "Traction & Product Validation", "Go-To-Market Strategy",
+        "Founding Team & Execution Capability", "Financial Viability & Funding Ask",
         "Revenue Model, Margins, and EBITDA"
     ]
-    prompt = (
-        "You are a VC analyst. Score the pitch on the following criteria. "
-        "For each, give a score (1-10), a short comment, and improvement tip. "
-        "Return markdown table: Criterion | Score | Notes | Suggestion.\n\n"
-    )
+    prompt = "You are a VC analyst. Score the pitch on the following criteria. "
+    prompt += "For each, give a score (1-10), a short comment, and improvement tip. Return markdown table: Criterion | Score | Notes | Suggestion.\n\n"
     for crit in criteria:
         matched_text = match_section(crit, sections)
         prompt += f"\n## {crit}\n{matched_text}\n"
@@ -133,14 +115,9 @@ def evaluate_pitch(sections: dict) -> str:
         result = "```\n" + result.strip() + "\n```"
     return clean_assistant_prefix(result)
 
-# Evaluate resume
-def evaluate_resume(sections: dict) -> str:
-    prompt = (
-        "You are a resume reviewer AI. Score the resume on the following sections: "
-        "Summary, Education, Experience, Projects, Skills, Formatting. "
-        "Give a 0-10 score with notes and improvements in markdown table format: "
-        "Section | Score | Notes | Suggestion.\n\n"
-    )
+def evaluate_resume(sections):
+    prompt = "You are a resume reviewer AI. Score the resume on the following sections: Summary, Education, Experience, Projects, Skills, Formatting. "
+    prompt += "Give a 0-10 score with notes and improvements in markdown table format: Section | Score | Notes | Suggestion.\n\n"
     for sec, content in sections.items():
         prompt += f"\n## {sec.title()}\n{content}\n"
     result = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
@@ -148,8 +125,7 @@ def evaluate_resume(sections: dict) -> str:
         result = "```\n" + result.strip() + "\n```"
     return clean_assistant_prefix(result)
 
-# Web search via Tavily
-def run_web_search(query: str, format_type: str = "summary") -> str:
+def run_web_search(query, format_type="summary"):
     try:
         search = TavilySearchAPIWrapper()
         results = search.results(query=query, max_results=3)
@@ -169,8 +145,7 @@ Query: {query}
     except Exception as e:
         return f"🌐 Web search failed: {str(e)}"
 
-# Normal GPT response
-def answer_chat(query: str, context: str = "") -> str:
+def answer_chat(query, context=""):
     history = "\n".join([f"User: {u}\nManna: {a}" for u, a, *_ in st.session_state.chat_history[-5:]])
     prompt = f"""
 You are Manna, an intelligent assistant. Use the conversation history and any provided context.
@@ -189,9 +164,25 @@ User Question:
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Manna - AI Deck & Resume Evaluator", page_icon="🤖")
+st.markdown("""
+<style>
+body {
+    background: linear-gradient(to right, #1f1c2c, #928dab);
+    color: white;
+}
+[data-testid="stChatMessage"] div {
+    background-color: #2e2e3e;
+    border-radius: 12px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+}
+[data-testid="stChatMessage"] span {
+    color: white !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 st.title("🤖 Manna: Resume & Pitch Deck Evaluator")
-
 st.subheader("📄 Upload PDF (Pitch Deck or Resume)")
 file = st.file_uploader("Upload a PDF", type=["pdf"])
 
@@ -204,13 +195,6 @@ if file:
     st.session_state.file_uploaded = True
 
     st.success("✅ File uploaded and parsed!")
-    if st.checkbox("Analyze as pitch deck?"):
-        eval_result = evaluate_pitch(sections)
-    else:
-        eval_result = evaluate_resume(sections)
-    st.markdown(eval_result)
-    st.session_state.chat_history.append(("Evaluate this file", eval_result, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-    save_history()
 
 st.divider()
 
@@ -221,30 +205,39 @@ if user_input:
     is_web = user_input.lower().startswith("search web:")
     user_query = user_input[len("search web:"):].strip() if is_web else user_input
 
-    metrics_keywords = ["revenue", "ebitda", "market size", "ask", "funding", "founder"]
-    if any(k in user_query.lower() for k in metrics_keywords) and st.session_state.parsed_doc:
-        metrics = extract_metrics(st.session_state.parsed_doc)
-        lines = []
-        for k in ["revenue", "ebitda", "market_size", "funding_ask", "founder_name"]:
-            value = metrics.get(k, "❌ Not found in document")
-            lines.append(f"- **{k.replace('_', ' ').title()}**: {value}")
-        answer = "\n".join(lines)
-    elif user_query.lower().strip() in ["evaluate this pitch", "re-evaluate pitch", "score pitch"]:
-        answer = evaluate_pitch(st.session_state.sections)
-    elif user_query.lower().strip() in ["evaluate this resume", "re-evaluate resume", "score resume"]:
-        answer = evaluate_resume(st.session_state.sections)
+    if not st.session_state.file_uploaded:
+        answer = answer_chat(user_query)
     elif is_web:
         answer = run_web_search(user_query, format_type)
-    elif st.session_state.file_uploaded and st.session_state.parsed_doc:
-        answer = answer_chat(user_query, context=st.session_state.parsed_doc)
     else:
-        answer = answer_chat(user_query)
+        keywords = ["revenue", "ebitda", "market size", "ask", "funding", "founder"]
+        if any(k in user_query.lower() for k in keywords):
+            metrics = extract_metrics(st.session_state.parsed_doc)
+            lines = []
+            for k in ["revenue", "ebitda", "market_size", "funding_ask", "founder_name"]:
+                value = metrics.get(k, "❌ Not found in document")
+                lines.append(f"- **{k.replace('_', ' ').title()}**: {value}")
+            answer = "\n".join(lines)
+        elif user_query.lower().strip() in ["evaluate this pitch", "re-evaluate pitch", "score pitch"]:
+            answer = evaluate_pitch(st.session_state.sections)
+        elif user_query.lower().strip() in ["evaluate this resume", "re-evaluate resume", "score resume"]:
+            answer = evaluate_resume(st.session_state.sections)
+        else:
+            answer = answer_chat(user_query, context=st.session_state.parsed_doc)
 
     answer = clean_assistant_prefix(answer)
-
     st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     save_history()
+    with st.chat_message("user"):
+        st.markdown(user_input)
+    with st.chat_message("assistant"):
+        st.markdown(answer)
 
-# --- Chat thread UI ---
-# (Keep your existing styled chat bubble UI below this comment)
-# [...]
+# Session display
+if st.session_state.chat_history:
+    st.markdown("---")
+    st.markdown("### 🧵 Chat History")
+    for user, assistant, ts in reversed(st.session_state.chat_history):
+        st.markdown(f"**🕒 {ts}**")
+        with st.expander(f"🧍‍♂️ {user}"):
+            st.markdown(f"{assistant}")
