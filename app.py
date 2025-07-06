@@ -208,52 +208,93 @@ st.markdown("## 🧵 Chat History")
 
 st.markdown(
     """
-    <style>
+   <style>
 .scrollbox {
   max-height: 500px;
   overflow-y: auto;
-  border: 1px solid #444;      /* darker border for dark mode */
+  border: 1px solid #d1d5db;      /* light gray border */
   padding: 1rem;
-  background-color: transparent;  /* or use your dark bg color, e.g. #121212 */
-  border-radius: 12px;
-  margin-bottom: 1rem;
+  background-color: #f9fafb;       /* very light off-white */
+  border-radius: 16px;
+  margin-bottom: 1.5rem;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.05);
 }
 
+.message {
+  margin-bottom: 1rem;
+  max-width: 75%;
+  padding: 14px 20px;
+  border-radius: 24px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  font-size: 1rem;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.1);
+  transition: background-color 0.3s ease;
+}
 
-    .message {
-      margin-bottom: 1rem;
-      max-width: 80%;
-      padding: 12px 16px;
-      border-radius: 16px;
-      line-height: 1.4;
-      white-space: pre-wrap;
-      box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
-    }
-    .user {
-      background-color: #2b6cb0;
-      color: white;
-      margin-left: auto;
-      border-bottom-right-radius: 2px;
-    }
-    .bot {
-      background-color: #e2e8f0;
-      color: #1a202c;
-      margin-right: auto;
-      border-bottom-left-radius: 2px;
-    }
-    .timestamp {
-      font-size: 0.7rem;
-      color: #718096;
-      margin-bottom: 4px;
-    }
-    .icon {
-      display: inline-block;
-      vertical-align: middle;
-      margin-right: 8px;
-      font-size: 1.2rem;
-    }
-    </style>
+/* User messages: warm blue with gentle gradient */
+.user {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: white;
+  margin-left: auto;
+  border-bottom-right-radius: 8px;
+  font-weight: 600;
+  box-shadow: 0 4px 10px rgb(59 130 246 / 0.4);
+}
+
+/* Bot messages: soft pastel lavender */
+.bot {
+  background: linear-gradient(135deg, #e0d7f8, #c4b5fd);
+  color: #2d2d42;
+  margin-right: auto;
+  border-bottom-left-radius: 8px;
+  font-weight: 500;
+  box-shadow: 0 4px 10px rgb(196 181 253 / 0.4);
+}
+
+.timestamp {
+  font-size: 0.75rem;
+  color: #6b7280;  /* cool gray */
+  margin-bottom: 6px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  user-select: none;
+}
+
+.icon {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 10px;
+  font-size: 1.3rem;
+  user-select: none;
+}
+
+/* Hover effect for messages */
+.message:hover {
+  filter: brightness(1.05);
+  cursor: default;
+}
+
+/* Scrollbar style */
+.scrollbox::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollbox::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 12px;
+}
+
+.scrollbox::-webkit-scrollbar-thumb {
+  background: #a78bfa;
+  border-radius: 12px;
+}
+
+.scrollbox::-webkit-scrollbar-thumb:hover {
+  background: #7c3aed;
+}
+</style>
+
     """,
     unsafe_allow_html=True,
 )
