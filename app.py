@@ -185,38 +185,35 @@ if user_input:
     st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     save_history()
 
-# 💬 Chat thread
+# 💬 Chat thread UI
 st.markdown("## 🧵 Chat History")
-scroll_style = """
+st.markdown("""
 <style>
 .scrollbox {
-  max-height: 400px;
+  max-height: 500px;
   overflow-y: auto;
-  padding-right: 10px;
+  border: 1px solid #ddd;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 1rem;
 }
 </style>
-"""
-st.markdown(scroll_style, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
-with st.container():
-    st.markdown('<div class="scrollbox">', unsafe_allow_html=True)
-    for i, entry in enumerate(st.session_state.chat_history):
-        if len(entry) == 3:
-            q, a, t = entry
-        else:
-            q, a = entry
-            t = "⏳"
+st.markdown('<div class="scrollbox">', unsafe_allow_html=True)
+for q, a, t in st.session_state.chat_history:
+    st.markdown(f"""
+    <div style='margin-bottom: 20px;'>
+        <div><b>🕐 {t}</b></div>
+        <div style='margin: 5px 0;'><b>🧑 You:</b> {q}</div>
+        <div><b>🤖 Manna:</b> {a}</div>
+    </div>
+    """, unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
-        st.markdown(f"""
-        <div style="background:#f9f9f9;padding:10px;border-radius:8px;margin-bottom:10px;">
-            <div><b>🕐 {t} | 🧑 You:</b> {q}</div>
-            <div style="margin-top:5px;"><b>🤖 Manna:</b> {a}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# 🧼 Clear chat button
+# 🧼 Clear chat
 if st.button("🗑️ Clear Chat History"):
     st.session_state.chat_history = []
     save_history()
-    st.experimental_rerun()
+    st.rerun()
