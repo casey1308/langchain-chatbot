@@ -6,7 +6,6 @@ import openai
 from io import BytesIO
 import re
 
-# LangChain components
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_community.document_loaders import PyPDFLoader
@@ -25,13 +24,13 @@ if not openai_api_key or not tavily_api_key:
     st.error("❌ Please set both OPENAI_API_KEY and TAVILY_API_KEY in your .env file.")
     st.stop()
 
-# Clean up Tavily content
+# Clean Tavily search result text
 def clean_text(text: str) -> str:
-    text = re.sub(r"(\w)\n(\w)", r"\1\2", text)  # collapse broken words
+    text = re.sub(r"(\w)\n(\w)", r"\1\2", text)
     text = re.sub(r"\n{2,}", "\n", text)
     return text.strip()
 
-# 🌐 Tavily Web Search
+# Tavily Search
 def run_web_search(query: str) -> str:
     try:
         search = TavilySearchAPIWrapper()
@@ -45,7 +44,7 @@ def run_web_search(query: str) -> str:
     except Exception as e:
         return f"🌐 Web search failed: {str(e)}"
 
-# 📄 VC Deck RAG
+# PDF Vector DB + RAG
 def build_qa_chain(uploaded_file) -> RetrievalQA:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(uploaded_file.read())
@@ -58,25 +57,25 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
     vectorstore = FAISS.from_documents(chunks, embeddings)
 
     system_template = (
-        "You are Manna, a friendly and expert AI assistant VC pitch deck evaluator. "
-        "You must use ONLY the structured evaluation data in the context below to generate your answer. "
-        "If the necessary data is missing, reply: 'Insufficient data to evaluate.'\n\n"
+        "You are Manna, a friendly and expert VC analyst AI. "
+        "Use ONLY the structured evaluation data below. "
+        "If the data is missing, respond with 'Insufficient data to evaluate.'\n\n"
         "Instructions:\n"
-        "1. Carefully read each evaluation criteria, its score (out of 10), and key insight.\n"
-        "2. Write a 3-line summary that reflects the strengths and risks of the opportunity.\n"
-        "3. Calculate and return the average Fit Score from all the given scores, rounded to one decimal place.\n\n"
+        "1. Score and evaluate the company using standard VC metrics (team, market, traction, etc).\n"
+        "2. Return output in {format} style.\n"
+        "3. End with average score if available.\n\n"
         "{context}\n\nQuestion: {question}"
     )
-
-    prompt = PromptTemplate(input_variables=["context", "question"], template=system_template)
+    prompt = PromptTemplate(input_variables=["context", "question", "format"], template=system_template)
 
     return RetrievalQA.from_chain_type(
         llm=ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key),
         retriever=vectorstore.as_retriever(),
         chain_type_kwargs={"prompt": prompt},
+        return_source_documents=False,
     )
 
-# 🧠 Streamlit Interface
+# Streamlit App UI
 st.set_page_config(page_title="Manna - Your AI VC Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI VC Evaluator")
 
@@ -87,14 +86,14 @@ uploaded_file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=
 if uploaded_file is not None:
     with st.spinner("🔍 Reading and indexing your pitch deck…"):
         st.session_state.qa_chain = build_qa_chain(uploaded_file)
-    st.success("✅ Pitch deck processed! Ask Manna anything below.")
+    st.success("✅ Pitch deck processed!")
 
 with st.chat_message("ai"):
-    st.markdown("Hi! I'm **Manna**, your AI VC assistant. Upload a deck or ask anything.")
+    st.markdown("Hi! I'm **Manna**, your VC assistant. Upload a deck or ask anything — even scorecards!")
 
-# 🎙️ Voice upload
+# Voice Upload
 st.subheader("🎙️ Speak to Manna")
-audio_file = st.file_uploader("Upload a WAV file (your voice)", type=["wav"])
+audio_file = st.file_uploader("Upload a WAV file", type=["wav"])
 if audio_file:
     st.audio(audio_file, format='audio/wav')
     with st.spinner("🗣️ Transcribing..."):
@@ -114,22 +113,38 @@ if audio_file:
             st.error(f"❌ Transcription failed: {str(e)}")
             user_input = None
 else:
-    user_input = st.chat_input("💬 Ask your question here")
+    user_input = st.chat_input("💬 Ask your question")
 
-# 🧠 Main Answer Logic
+# Output Format Inference
+def infer_format_from_query(query: str) -> str:
+    q = query.lower()
+    if "hypher" in q or "hierarchy" in q:
+        return "hypher"
+    elif "map" in q or "mapping" in q:
+        return "map"
+    elif "table" in q or "score" in q or "parameter" in q or "criteria" in q:
+        return "table"
+    return "summary"
+
+# Main QA Logic
 if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
+    format_type = infer_format_from_query(user_input)
+
     try:
         if st.session_state.qa_chain:
-            answer = st.session_state.qa_chain.run(user_input)
-            if "Insufficient data" in answer or not answer.strip():
-                raise ValueError("Fallback")
+            answer = st.session_state.qa_chain.run({
+                "question": user_input,
+                "format": format_type
+            })
+            if "Insufficient data" in answer:
+                raise ValueError("Fallback to search")
         else:
-            raise ValueError("No PDF uploaded")
+            raise ValueError("No pitch deck loaded")
     except:
-        with st.spinner("🌐 Not enough info in deck. Searching the web..."):
+        with st.spinner("🌐 Searching web for insights..."):
             answer = run_web_search(user_input)
 
     with st.chat_message("ai"):
