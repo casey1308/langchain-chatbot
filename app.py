@@ -36,7 +36,6 @@ def save_history():
         json.dump(st.session_state.chat_history, f, indent=2)
 
 # Clean text
-
 def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     text = re.sub(r"\n{2,}", "\n", text)
@@ -91,6 +90,8 @@ def extract_metrics(doc):
 
 def infer_format(query):
     query = query.lower()
+    if "trend" in query and "score" in query:
+        return "trend_table"
     if "table" in query or "score" in query:
         return "table"
     if "map" in query:
@@ -98,6 +99,17 @@ def infer_format(query):
     if "hierarchy" in query or "hypher" in query:
         return "hypher"
     return "summary"
+
+def generate_trend_score_table():
+    return """
+| Parameter                        | Score | Notes                                  | Suggestion                               |
+|----------------------------------|-------|----------------------------------------|------------------------------------------|
+| Market Opportunity               | 8/10  | Clear TAM/SAM/SOM provided.            | Add citation or third-party validation.  |
+| Competitive Landscape            | 6/10  | Lists competitors but lacks analysis.  | Provide SWOT or differentiation matrix.  |
+| Financial Model & Projections    | 7/10  | Includes revenue & cost model.         | Improve clarity on margins/EBITDA.       |
+| Team Experience & Capability     | 9/10  | Strong founder & domain expertise.     | Add track record of execution.           |
+| Ask & Use of Funds               | 5/10  | General ask mentioned.                 | Break down how funds will be used.       |
+"""
 
 def evaluate_pitch(sections):
     criteria = [
@@ -202,7 +214,7 @@ if file:
 
 st.divider()
 
-user_input = st.chat_input("💬 Ask Manna anything (e.g. 'What traction is mentioned?' or 'search web: Nvidia news')")
+user_input = st.chat_input("💬 Ask Manna anything (e.g. 'What traction is mentioned?' or 'trend score')")
 
 if user_input:
     format_type = infer_format(user_input)
@@ -211,6 +223,8 @@ if user_input:
 
     if not st.session_state.file_uploaded:
         answer = answer_chat(user_query)
+    elif format_type == "trend_table":
+        answer = generate_trend_score_table()
     elif is_web:
         answer = run_web_search(user_query, format_type)
     else:
