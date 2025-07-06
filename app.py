@@ -44,7 +44,7 @@ def run_web_search(query: str, format_type="summary") -> str:
             return "🌐 No results found."
 
         combined = "\n\n".join(
-            f"{r['title']}\n{clean_text(r['content'][:800])}" for r in results if r.get("content")
+            f"{r['title']}:\n{clean_text(r['content'][:800])}" for r in results if r.get("content")
         )
         history = "\n\n".join(
             f"User: {u}\nManna: {a}" for u, a in st.session_state.chat_history[-5:]
@@ -128,12 +128,25 @@ Pitch Deck Text:
     resp = llm.invoke(prompt)
     return resp.content
 
-# General GPT chat
-
+# General GPT chat with memory
 def answer_with_openai(query: str) -> str:
     try:
+        history_context = "\n\n".join(
+            f"User: {q}\nManna: {a}" for q, a in st.session_state.chat_history[-5:]
+        )
+
+        prompt = f"""
+You are Manna, a helpful AI assistant. Use the chat history and current user question to answer thoughtfully.
+
+Chat History:
+{history_context}
+
+Current Question:
+{query}
+"""
         chat = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
-        return chat.invoke(query).content
+        return chat.invoke(prompt).content
+
     except Exception as e:
         return f"❌ GPT error: {str(e)}"
 
@@ -156,28 +169,28 @@ if uploaded_file:
     uploaded_file.seek(0)
     st.success("✅ File uploaded successfully")
 
-# Chat thread UI
-for user, bot in st.session_state.chat_history:
-    with st.chat_message("user"):
-        st.markdown(user)
-    with st.chat_message("ai"):
-        st.markdown(bot)
-
 # Chat input
-if prompt := st.chat_input("💬 Ask something about your file or just use GPT"):
-    fmt = infer_format_from_query(prompt)
-    wants_web = web_search_enabled and prompt.lower().startswith("search web:")
+user_input = st.text_input("💬 Ask something about your file or just use GPT")
+
+if user_input:
+    st.markdown(f"**You:** {user_input}")
+    fmt = infer_format_from_query(user_input)
+    answer = None
+
+    wants_web = web_search_enabled and user_input.lower().startswith("search web:")
 
     if wants_web:
-        query = prompt[len("search web:"):].strip()
+        query = user_input[len("search web:"):].strip()
         answer = run_web_search(query, fmt)
     elif file_bytes:
-        answer = analyze_resume(file_bytes, fmt) if resume_mode else analyze_deck(file_bytes, fmt)
+        if resume_mode:
+            answer = analyze_resume(file_bytes, fmt)
+        else:
+            answer = analyze_deck(file_bytes, fmt)
     else:
-        answer = answer_with_openai(prompt)
+        answer = answer_with_openai(user_input)
 
-    st.session_state.chat_history.append((prompt, answer))
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    with st.chat_message("ai"):
+    if answer:
+        st.markdown("**Manna:**")
         st.markdown(answer)
+        st.session_state.chat_history.append((user_input, answer))
