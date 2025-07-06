@@ -9,6 +9,7 @@ import re
 # LangChain components
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 
 # Load .env variables
 load_dotenv()
@@ -33,6 +34,32 @@ def infer_format_from_query(query: str) -> str:
     if "table" in q or "score" in q or "criteria" in q:
         return "table"
     return "summary"
+
+# Web search fallback
+def run_web_search(query: str, format_type="summary") -> str:
+    try:
+        search = TavilySearchAPIWrapper()
+        results = search.results(query=query, max_results=3)
+        if not results:
+            return "🌐 No results found."
+
+        combined = "\n\n".join(
+            f"{r['title']}:\n{clean_text(r['content'][:800])}" for r in results if r.get("content")
+        )
+        history = "\n\n".join(
+            f"User: {u}\nManna: {a}" for u, a in st.session_state.chat_history[-5:]
+        )
+        system = (
+            "You are a VC analyst AI. Use the web results and prior chat history to answer.\n\n"
+            f"History:\n{history}\n\n"
+            f"Web Results:\n{combined}\n\n"
+            f"Answer in {format_type} format for query: {query}"
+        )
+        llm = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
+        resp = llm.invoke(system)
+        return resp.content
+    except Exception as e:
+        return f"🌐 Web search failed: {str(e)}"
 
 # Resume analyzer
 def analyze_resume(file_bytes: bytes, format_type="table") -> str:
@@ -83,7 +110,7 @@ def analyze_deck(file_bytes: bytes, format_type="table") -> str:
     pages = PyPDFLoader(pdf_path).load()
     text = "\n\n".join([p.page_content for p in pages])
     prompt = f"""
-You are a VC analyst AI reviewing a pitch deck. Evaluate it based on the following criteria:
+You are a VC analyst AI reviewing a pitch deck. Evaluate it based on these criteria:
 {chr(10).join(f"- {c}" for c in criteria)}
 
 For each criterion:
@@ -108,42 +135,38 @@ st.title("🤖 Manna: Resume & Pitch Deck Scorer")
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Upload mode
-esume_mode = st.checkbox("📄 Analyze as Resume (uncheck for Pitch Deck)")
+# UI widgets
+resume_mode = st.checkbox("📄 Analyze as Resume (uncheck for Pitch Deck)")
 uploaded_file = st.file_uploader("Upload a PDF (Resume or Deck)", type=["pdf"])
-# Optional explicit web search trigger
-enable_web_search = st.checkbox("🌐 Allow web search on request (unchecked by default)")
+web_search_enabled = st.checkbox("🌐 Allow web search on request (prefix with 'search web:')")
 
 file_bytes = None
 if uploaded_file:
     file_bytes = uploaded_file.read()
     uploaded_file.seek(0)
-    if resume_mode:
-        st.success("✅ Resume loaded — ask me to score it!")
-    else:
-        st.success("✅ Pitch deck loaded — ask me to score it!")
+    st.success("✅ File uploaded successfully")
 
-user_input = st.text_input("💬 Enter any question (e.g., 'Score my document')")
+# Chat input
+user_input = st.text_input("💬 Ask something about your file or say 'search web: ...'")
 
 if user_input:
     st.markdown(f"**You:** {user_input}")
     fmt = infer_format_from_query(user_input)
     answer = None
-    # Determine if user explicitly requests web search
-    wants_web = enable_web_search and user_input.lower().startswith("search web:")
+
+    wants_web = web_search_enabled and user_input.lower().startswith("search web:")
 
     if wants_web:
-        # strip trigger
         query = user_input[len("search web:"):].strip()
         answer = run_web_search(query, fmt)
     elif resume_mode and file_bytes:
         answer = analyze_resume(file_bytes, fmt)
-    elif (not resume_mode) and file_bytes:
+    elif not resume_mode and file_bytes:
         answer = analyze_deck(file_bytes, fmt)
     else:
         st.warning("⚠️ Please upload a document first.")
 
     if answer:
-        st.markdown(f"**Manna:**")
+        st.markdown("**Manna:**")
         st.markdown(answer)
         st.session_state.chat_history.append((user_input, answer))
