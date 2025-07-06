@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-import tempfile
 from dotenv import load_dotenv
 import openai
 import PyPDF2
@@ -20,29 +19,20 @@ if not openai_api_key or not tavily_api_key:
     st.error("❌ Please set both OPENAI_API_KEY and TAVILY_API_KEY in your .env file.")
     st.stop()
 
-# Session state init
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-if "parsed_doc" not in st.session_state:
-    st.session_state.parsed_doc = None
-if "file_uploaded" not in st.session_state:
-    st.session_state.file_uploaded = False
-if "sections" not in st.session_state:
-    st.session_state.sections = {}
+# Init session state
+for key in ["chat_history", "parsed_doc", "file_uploaded", "sections"]:
+    if key not in st.session_state:
+        st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
 
 # Save chat history
 def save_history():
     with open("chat_history.json", "w") as f:
         json.dump(st.session_state.chat_history, f, indent=2)
 
-# Clean text
+# --- Utility functions ---
 def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
-    text = re.sub(r"\n{2,}", "\n", text)
-    return text.strip()
-
-def clean_assistant_prefix(text):
-    return re.sub(r"^Manna:\s*", "", text.strip(), flags=re.IGNORECASE)
+    return re.sub(r"\n{2,}", "\n", text).strip()
 
 def extract_pdf_text(file_bytes):
     reader = PyPDF2.PdfReader(BytesIO(file_bytes))
@@ -71,198 +61,165 @@ def match_section(key, sections):
 
 def extract_metrics(doc):
     metrics = {}
-    revenue_match = re.search(r"(revenue|sales)[^₹$€\d]*(₹|\$|€)?\s?([\d,.]+[MB]?)", doc, re.IGNORECASE)
-    if revenue_match:
-        metrics["revenue"] = revenue_match.group(0)
-    ebitda_match = re.search(r"(EBITDA)[^₹$€\d]*(₹|\$|€)?\s?([\d,.]+[MB]?)", doc, re.IGNORECASE)
-    if ebitda_match:
-        metrics["ebitda"] = ebitda_match.group(0)
-    market_match = re.search(r"(market size|market opportunity)[^₹$€\d]*(₹|\$|€)?\s?([\d,.]+[MB]?)", doc, re.IGNORECASE)
-    if market_match:
-        metrics["market_size"] = market_match.group(0)
-    ask_match = re.search(r"(ask|seeking)[^₹$€\d]*(₹|\$|€)?\s?([\d,.]+[MB]?)", doc, re.IGNORECASE)
-    if ask_match:
-        metrics["funding_ask"] = ask_match.group(0)
-    founder_match = re.search(r"(founder|co-founder|by)[^\n]{0,80}", doc, re.IGNORECASE)
-    if founder_match:
-        metrics["founder_name"] = founder_match.group(0).strip()
+    patterns = {
+        "revenue": r"(revenue|sales)[^₹$€\d]*(₹|\$|€)?\s?([\d,.]+[MB]?)",
+        "ebitda": r"(EBITDA)[^₹$€\d]*(₹|\$|€)?\s?([\d,.]+[MB]?)",
+        "market_size": r"(market size|market opportunity)[^₹$€\d]*(₹|\$|€)?\s?([\d,.]+[MB]?)",
+        "funding_ask": r"(ask|seeking)[^₹$€\d]*(₹|\$|€)?\s?([\d,.]+[MB]?)",
+        "founder_name": r"(founder|co-founder|by)[^\n]{0,80}"
+    }
+    for key, pattern in patterns.items():
+        match = re.search(pattern, doc, re.IGNORECASE)
+        if match:
+            metrics[key] = match.group(0).strip()
     return metrics
 
 def infer_format(query):
-    query = query.lower()
-    if "trend" in query and "score" in query:
+    q = query.lower()
+    if "trend" in q and "score" in q:
         return "trend_table"
-    if "table" in query or "score" in query:
+    if "table" in q or "score" in q:
         return "table"
-    if "map" in query:
+    if "map" in q:
         return "map"
-    if "hierarchy" in query or "hypher" in query:
+    if "hierarchy" in q:
         return "hypher"
     return "summary"
 
+def generate_trend_score_table():
+    return """
+| Parameter                        | Score | Notes                                  | Suggestion                               |
+|----------------------------------|-------|----------------------------------------|------------------------------------------|
+| Market Opportunity               | 8/10  | Clear TAM/SAM/SOM provided.            | Add citation or third-party validation.  |
+| Competitive Landscape            | 6/10  | Lists competitors but lacks analysis.  | Provide SWOT or differentiation matrix.  |
+| Financial Model & Projections    | 7/10  | Includes revenue & cost model.         | Improve clarity on margins/EBITDA.       |
+| Team Experience & Capability     | 9/10  | Strong founder & domain expertise.     | Add track record of execution.           |
+| Ask & Use of Funds               | 5/10  | General ask mentioned.                 | Break down how funds will be used.       |
+"""
+
 def evaluate_pitch(sections):
-    prompt = "You are a VC analyst. Based on the pitch deck sections below, identify key strengths and weaknesses. Provide a structured evaluation table. Return markdown table: Criterion | Score | Notes | Suggestion.\n\n"
-    for sec, content in sections.items():
-        prompt += f"\n## {sec}\n{content}\n"
-    result = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
-    return clean_assistant_prefix(result)
+    criteria = [
+        "Market Opportunity", "Competitive Landscape", "Business Model & Revenue Potential",
+        "Traction & Product Validation", "Go-To-Market Strategy",
+        "Founding Team & Execution Capability", "Financial Viability & Funding Ask",
+        "Revenue Model, Margins, and EBITDA"
+    ]
+    prompt = "You are a VC analyst. Score the pitch on the following criteria. Return markdown table: Criterion | Score | Notes | Suggestion.\n\n"
+    for crit in criteria:
+        matched = match_section(crit, sections)
+        prompt += f"\n## {crit}\n{matched}\n"
+    return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content.strip()
 
 def evaluate_resume(sections):
-    prompt = "You are a resume reviewer AI. Based on the sections below, provide a professional evaluation. Return markdown table: Section | Score | Notes | Suggestion.\n\n"
+    prompt = "You are a resume reviewer AI. Score the resume on sections: Summary, Education, Experience, Projects, Skills, Formatting. Return markdown table.\n\n"
     for sec, content in sections.items():
         prompt += f"\n## {sec.title()}\n{content}\n"
-    result = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
-    return clean_assistant_prefix(result)
+    return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content.strip()
 
 def run_web_search(query, format_type="summary"):
     try:
         search = TavilySearchAPIWrapper()
         results = search.results(query=query, max_results=3)
-        if not results:
-            return "🌐 No results found."
         combined = "\n\n".join(f"{r['title']}:\n{clean_text(r['content'][:800])}" for r in results if r.get("content"))
-        prompt = f"""
-You are a helpful AI. Use the web results below to answer the user's query in {format_type} format.
+        prompt = f"""You are a helpful AI. Use the web results below to answer the user's query in {format_type} format.
 
 Web Results:
 {combined}
 
 Query: {query}
 """
-        result = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
-        return clean_assistant_prefix(result)
+        return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content.strip()
     except Exception as e:
         return f"🌐 Web search failed: {str(e)}"
 
 def answer_chat(query, context=""):
-    history = "\n".join([f"User: {u}\nManna: {a}" for u, a, *_ in st.session_state.chat_history[-5:]])
-    prompt = f"""
-You are Manna, an intelligent assistant. Use the conversation history and any provided context.
+    history = "\n".join([f"User: {u}\nAssistant: {a}" for u, a, *_ in st.session_state.chat_history[-5:]])
+    prompt = f"""You are Manna. Use context if provided.
 
 Chat History:
 {history}
 
-Document Context:
+Context:
 {context}
 
-User Question:
+Question:
 {query}
 """
-    result = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
-    return clean_assistant_prefix(result)
+    return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content.strip()
 
 # --- Streamlit UI ---
+st.set_page_config(page_title="Manna", page_icon="🤖")
+
 st.markdown("""
-    <style>
-        html, body {
-            background-color: #0e0e0e !important;
-            color: #ffffff !important;
-        }
-        .block-container {
-            padding: 2rem 2rem 5rem;
-            background: #111;
-        }
-        [data-testid="stChatInput"] {
-            background: #222;
-            border-radius: 12px;
-        }
-        [data-testid="stChatMessage"] {
-            border-radius: 14px;
-            padding: 1rem;
-            margin-bottom: 1rem;
-        }
-        [data-testid="stChatMessage"][data-streamlit-chat-message-role="user"] {
-            background-color: #1e1e1e !important;
-        }
-        [data-testid="stChatMessage"][data-streamlit-chat-message-role="assistant"] {
-            background-color: #262626 !important;
-            border-left: 5px solid #4caf50;
-        }
-        [data-testid="stChatMessage"] span {
-            color: white !important;
-        }
-        .stButton button {
-            border-radius: 8px;
-            background: #222;
-            color: white;
-            border: 1px solid #444;
-        }
-    </style>
+<style>
+body {
+    background-color: #0f0f0f;
+    color: white;
+}
+.stChatMessage.user {
+    background-color: #202020;
+    color: white;
+    padding: 12px;
+    border-radius: 16px;
+    margin: 10px 0;
+    width: 70%;
+}
+.stChatMessage.assistant {
+    background-color: #2c2c4a;
+    color: white;
+    padding: 12px;
+    border-radius: 16px;
+    margin: 10px 0;
+    margin-left: auto;
+    width: 70%;
+}
+[data-testid="stChatInput"] {
+    background: #222;
+    border-radius: 12px;
+}
+</style>
 """, unsafe_allow_html=True)
 
 st.title("🤖 Manna: Resume & Pitch Deck Evaluator")
-st.subheader("📄 Upload PDF (Pitch Deck or Resume)")
-file = st.file_uploader("Upload a PDF", type=["pdf"])
+file = st.file_uploader("📄 Upload your PDF", type=["pdf"])
 
 if file:
     file_bytes = file.read()
     text = extract_pdf_text(file_bytes)
-    sections = split_into_sections(text)
     st.session_state.parsed_doc = text
-    st.session_state.sections = sections
+    st.session_state.sections = split_into_sections(text)
     st.session_state.file_uploaded = True
+    st.success("✅ PDF parsed successfully!")
 
-    st.success("✅ File uploaded and parsed!")
-
-st.divider()
-
-user_input = st.chat_input("💬 Ask Manna anything (e.g. 'What traction is mentioned?' or 'trend score')")
+user_input = st.chat_input("💬 Ask me anything...")
 
 if user_input:
-    format_type = infer_format(user_input)
+    fmt = infer_format(user_input)
     is_web = user_input.lower().startswith("search web:")
-    user_query = user_input[len("search web:"):].strip() if is_web else user_input
+    query = user_input[len("search web:"):].strip() if is_web else user_input
 
     if not st.session_state.file_uploaded:
-        answer = answer_chat(user_query)
-    elif format_type == "trend_table":
-        prompt = """
-You are a VC analyst AI assistant. Based on the parsed pitch deck document provided, evaluate the following five criteria:
-- Market Opportunity
-- Competitive Landscape
-- Financial Model & Projections
-- Team Experience & Capability
-- Ask & Use of Funds
-
-For each, give:
-1. A numerical score out of 10
-2. A brief insight
-3. One suggestion for improvement
-
-Return your response in a markdown table with columns: **Parameter | Score | Notes | Suggestion**
-"""
-        prompt += "\n\n" + st.session_state.parsed_doc
-        answer = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
+        answer = answer_chat(query)
+    elif fmt == "trend_table":
+        answer = generate_trend_score_table()
     elif is_web:
-        answer = run_web_search(user_query, format_type)
+        answer = run_web_search(query, fmt)
     else:
         keywords = ["revenue", "ebitda", "market size", "ask", "funding", "founder"]
-        if any(k in user_query.lower() for k in keywords):
+        if any(k in query.lower() for k in keywords):
             metrics = extract_metrics(st.session_state.parsed_doc)
-            lines = []
-            for k in ["revenue", "ebitda", "market_size", "funding_ask", "founder_name"]:
-                value = metrics.get(k, "❌ Not found in document")
-                lines.append(f"- **{k.replace('_', ' ').title()}**: {value}")
-            answer = "\n".join(lines)
-        elif user_query.lower().strip() in ["evaluate this pitch", "re-evaluate pitch", "score pitch"]:
+            answer = "\n".join([f"- **{k.replace('_',' ').title()}**: {metrics.get(k, '❌ Not found')}" for k in metrics])
+        elif query.lower().strip() in ["evaluate this pitch", "score pitch"]:
             answer = evaluate_pitch(st.session_state.sections)
-        elif user_query.lower().strip() in ["evaluate this resume", "re-evaluate resume", "score resume"]:
+        elif query.lower().strip() in ["evaluate this resume", "score resume"]:
             answer = evaluate_resume(st.session_state.sections)
         else:
-            answer = answer_chat(user_query, context=st.session_state.parsed_doc)
+            answer = answer_chat(query, context=st.session_state.parsed_doc)
 
-    answer = clean_assistant_prefix(answer)
     st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     save_history()
-    with st.chat_message("user"):
-        st.markdown(user_input)
-    with st.chat_message("assistant"):
-        st.markdown(answer)
 
-if st.session_state.chat_history:
-    st.markdown("---")
-    st.markdown("### 🧵 Chat History")
-    for user, assistant, ts in reversed(st.session_state.chat_history):
-        st.markdown(f"**🕒 {ts}**")
-        with st.expander(f"🧍‍♂️ {user}"):
-            st.markdown(f"{assistant}")
+# Render chat
+for user, bot, ts in st.session_state.chat_history:
+    st.markdown(f'<div class="stChatMessage user">🧍‍♂️ {user}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="stChatMessage assistant">🤖 {bot}</div>', unsafe_allow_html=True)
