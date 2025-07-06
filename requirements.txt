@@ -8,3 +8,4 @@ langchain-openai
 tavily-python
 pypdf
 faiss-cpu
+PyPDF2
