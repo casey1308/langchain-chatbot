@@ -100,42 +100,18 @@ def infer_format(query):
         return "hypher"
     return "summary"
 
-def generate_trend_score_table():
-    return """
-| Parameter                        | Score | Notes                                  | Suggestion                               |
-|----------------------------------|-------|----------------------------------------|------------------------------------------|
-| Market Opportunity               | 8/10  | Clear TAM/SAM/SOM provided.            | Add citation or third-party validation.  |
-| Competitive Landscape            | 6/10  | Lists competitors but lacks analysis.  | Provide SWOT or differentiation matrix.  |
-| Financial Model & Projections    | 7/10  | Includes revenue & cost model.         | Improve clarity on margins/EBITDA.       |
-| Team Experience & Capability     | 9/10  | Strong founder & domain expertise.     | Add track record of execution.           |
-| Ask & Use of Funds               | 5/10  | General ask mentioned.                 | Break down how funds will be used.       |
-"""
-
 def evaluate_pitch(sections):
-    criteria = [
-        "Market Opportunity", "Competitive Landscape", "Business Model & Revenue Potential",
-        "Traction & Product Validation", "Go-To-Market Strategy",
-        "Founding Team & Execution Capability", "Financial Viability & Funding Ask",
-        "Revenue Model, Margins, and EBITDA"
-    ]
-    prompt = "You are a VC analyst. Score the pitch on the following criteria. "
-    prompt += "For each, give a score (1-10), a short comment, and improvement tip. Return markdown table: Criterion | Score | Notes | Suggestion.\n\n"
-    for crit in criteria:
-        matched_text = match_section(crit, sections)
-        prompt += f"\n## {crit}\n{matched_text}\n"
+    prompt = "You are a VC analyst. Based on the pitch deck sections below, identify key strengths and weaknesses. Provide a structured evaluation table. Return markdown table: Criterion | Score | Notes | Suggestion.\n\n"
+    for sec, content in sections.items():
+        prompt += f"\n## {sec}\n{content}\n"
     result = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
-    if not result.strip().startswith("| Criterion") and "|" in result:
-        result = "```\n" + result.strip() + "\n```"
     return clean_assistant_prefix(result)
 
 def evaluate_resume(sections):
-    prompt = "You are a resume reviewer AI. Score the resume on the following sections: Summary, Education, Experience, Projects, Skills, Formatting. "
-    prompt += "Give a 0-10 score with notes and improvements in markdown table format: Section | Score | Notes | Suggestion.\n\n"
+    prompt = "You are a resume reviewer AI. Based on the sections below, provide a professional evaluation. Return markdown table: Section | Score | Notes | Suggestion.\n\n"
     for sec, content in sections.items():
         prompt += f"\n## {sec.title()}\n{content}\n"
     result = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
-    if not result.strip().startswith("| Section") and "|" in result:
-        result = "```\n" + result.strip() + "\n```"
     return clean_assistant_prefix(result)
 
 def run_web_search(query, format_type="summary"):
@@ -176,24 +152,40 @@ User Question:
     return clean_assistant_prefix(result)
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Manna - AI Deck & Resume Evaluator", page_icon="🤖")
 st.markdown("""
     <style>
-        body {
-            background: #0f0f0f;
-            color: white;
+        html, body {
+            background-color: #0e0e0e !important;
+            color: #ffffff !important;
         }
-        [data-testid="stChatMessage"] div {
-            background-color: #2a2a2a;
+        .block-container {
+            padding: 2rem 2rem 5rem;
+            background: #111;
+        }
+        [data-testid="stChatInput"] {
+            background: #222;
             border-radius: 12px;
+        }
+        [data-testid="stChatMessage"] {
+            border-radius: 14px;
             padding: 1rem;
-            margin: 0.5rem 0;
+            margin-bottom: 1rem;
+        }
+        [data-testid="stChatMessage"][data-streamlit-chat-message-role="user"] {
+            background-color: #1e1e1e !important;
+        }
+        [data-testid="stChatMessage"][data-streamlit-chat-message-role="assistant"] {
+            background-color: #262626 !important;
+            border-left: 5px solid #4caf50;
         }
         [data-testid="stChatMessage"] span {
             color: white !important;
         }
-        .block-container {
-            padding: 2rem 2rem 5rem;
+        .stButton button {
+            border-radius: 8px;
+            background: #222;
+            color: white;
+            border: 1px solid #444;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -224,7 +216,23 @@ if user_input:
     if not st.session_state.file_uploaded:
         answer = answer_chat(user_query)
     elif format_type == "trend_table":
-        answer = generate_trend_score_table()
+        prompt = """
+You are a VC analyst AI assistant. Based on the parsed pitch deck document provided, evaluate the following five criteria:
+- Market Opportunity
+- Competitive Landscape
+- Financial Model & Projections
+- Team Experience & Capability
+- Ask & Use of Funds
+
+For each, give:
+1. A numerical score out of 10
+2. A brief insight
+3. One suggestion for improvement
+
+Return your response in a markdown table with columns: **Parameter | Score | Notes | Suggestion**
+"""
+        prompt += "\n\n" + st.session_state.parsed_doc
+        answer = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
     elif is_web:
         answer = run_web_search(user_query, format_type)
     else:
