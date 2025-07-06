@@ -1,161 +1,184 @@
 import streamlit as st
 import os
+import tempfile
 from dotenv import load_dotenv
-import re
+import openai
 import PyPDF2
+import re
 from io import BytesIO
+
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
-from streamlit_chat import message
 
-# Load .env
+# Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 tavily_api_key = os.getenv("TAVILY_API_KEY")
-
-# Validate keys
 if not openai_api_key or not tavily_api_key:
-    st.error("❌ Set both OPENAI_API_KEY and TAVILY_API_KEY in your .env file.")
+    st.error("❌ Please set both OPENAI_API_KEY and TAVILY_API_KEY in your .env file.")
     st.stop()
 
-# Set config
-st.set_page_config("🤖 Manna: GPT + Analyzer", page_icon="🤖")
-st.title("🤖 Manna: Resume + Pitch Deck Analyzer")
-
-# Session setup
+# Initialize chat history and content memory
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "parsed_doc" not in st.session_state:
+    st.session_state.parsed_doc = None
+if "file_uploaded" not in st.session_state:
+    st.session_state.file_uploaded = False
 
-# ---- Utilities ----
-def clean_text(text):
-    return re.sub(r"(\w)\n(\w)", r"\1\2", text).strip()
+# Clean text
+def clean_text(text: str) -> str:
+    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
+    text = re.sub(r"\n{2,}", "\n", text)
+    return text.strip()
 
-def extract_pdf_text(file_bytes):
-    pdf = PyPDF2.PdfReader(BytesIO(file_bytes))
-    return "\n".join([page.extract_text() or "" for page in pdf.pages])
+# PDF text extractor
+def extract_pdf_text(file_bytes: bytes) -> str:
+    reader = PyPDF2.PdfReader(BytesIO(file_bytes))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    return clean_text(text)
 
-def infer_format(query):
-    q = query.lower()
-    if "table" in q or "score" in q or "criteria" in q:
+# Section-based chunking
+def split_into_sections(text: str) -> dict:
+    sections = {}
+    current = "General"
+    headings = [
+        "summary", "objective", "education", "experience", "projects", "skills", "market", "team",
+        "business model", "financials", "revenue", "traction", "competition", "go-to-market", "ask", "funding"
+    ]
+    for line in text.splitlines():
+        l = line.strip()
+        if any(h in l.lower() for h in headings):
+            current = l.strip()
+            sections[current] = []
+        sections.setdefault(current, []).append(l)
+    return {k: "\n".join(v) for k, v in sections.items()}
+
+# Format inference
+def infer_format(query: str) -> str:
+    query = query.lower()
+    if "table" in query or "score" in query:
         return "table"
-    if "map" in q:
+    if "map" in query:
         return "map"
-    if "hypher" in q or "hierarchy" in q:
+    if "hierarchy" in query or "hypher" in query:
         return "hypher"
     return "summary"
 
-# ---- Analyzer functions ----
-def analyze_resume(text):
-    prompt = f"""
-You are a resume evaluator AI. Based on this text, assign section-wise scores and suggestions.
-
-Resume Content:
-{text}
-
-Return in markdown table: Section | Score | Notes | Suggested Improvement
-"""
-    llm = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
-    return llm.invoke(prompt).content
-
-def analyze_pitch_deck(text):
+# Evaluate pitch deck
+def evaluate_pitch(sections: dict) -> str:
     criteria = [
-        "Market Opportunity", "Competitive Landscape", "Business Model & Revenue Potential",
-        "Traction & Product Validation", "Go-To-Market Strategy",
-        "Founding Team & Execution Capability", "Financial Viability & Funding Ask",
+        "Market Opportunity",
+        "Competitive Landscape",
+        "Business Model & Revenue Potential",
+        "Traction & Product Validation",
+        "Go-To-Market Strategy",
+        "Founding Team & Execution Capability",
+        "Financial Viability & Funding Ask",
         "Revenue Model, Margins, and EBITDA"
     ]
-    prompt = f"""
-You are a VC analyst AI. Score each of the following areas on a scale of 1–10 based on the pitch deck text.
-
-Pitch Content:
-{text}
-
-Return in markdown table: Criterion | Score | Notes | Suggested Improvement
-"""
+    prompt = (
+        "You are a VC analyst. Score the pitch on the following criteria. "
+        "For each, give a score (1-10), a short comment, and improvement tip. "
+        "Return markdown table: Criterion | Score | Notes | Suggestion.\n\n"
+    )
     for crit in criteria:
-        prompt += f"\n## {crit}\n"
+        prompt += f"\n## {crit}\n{sections.get(crit.lower(), 'Not mentioned')}\n"
+    return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
 
-    llm = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
-    return llm.invoke(prompt).content
+# Evaluate resume
+def evaluate_resume(sections: dict) -> str:
+    prompt = (
+        "You are a resume reviewer AI. Score the resume on the following sections: "
+        "Summary, Education, Experience, Projects, Skills, Formatting. "
+        "Give a 0-10 score with notes and improvements in markdown table format: "
+        "Section | Score | Notes | Suggestion.\n\n"
+    )
+    for sec, content in sections.items():
+        prompt += f"\n## {sec.title()}\n{content}\n"
+    return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
 
-def run_web_search(query, format_type):
+# Web search via Tavily
+def run_web_search(query: str, format_type: str = "summary") -> str:
     try:
         search = TavilySearchAPIWrapper()
         results = search.results(query=query, max_results=3)
         if not results:
             return "🌐 No results found."
-        combined = "\n\n".join(
-            f"{r['title']}\n{clean_text(r['content'][:700])}" for r in results if r.get("content")
-        )
-        context = "\n\n".join(
-            f"User: {u}\nManna: {a}" for u, a in st.session_state.chat_history[-5:]
-        )
+        combined = "\n\n".join(f"{r['title']}:\n{clean_text(r['content'][:800])}" for r in results if r.get("content"))
         prompt = f"""
-You are Manna, a smart GPT-based analyst. Use the info below to respond.
-
-Chat History:
-{context}
+You are a helpful AI. Use the web results below to answer the user's query in {format_type} format.
 
 Web Results:
 {combined}
 
-Respond to: {query}
+Query: {query}
 """
         return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
     except Exception as e:
-        return f"🌐 Web search failed: {e}"
+        return f"🌐 Web search failed: {str(e)}"
 
-def answer_general_query(query):
-    history = "\n\n".join(f"User: {u}\nManna: {a}" for u, a in st.session_state.chat_history[-5:])
+# Normal GPT response
+def answer_chat(query: str, context: str = "") -> str:
+    history = "\n".join([f"User: {u}\nManna: {a}" for u, a in st.session_state.chat_history[-5:]])
     prompt = f"""
-You are Manna, a friendly and smart GPT assistant.
+You are Manna, an intelligent assistant. Use the conversation history and any provided context.
 
 Chat History:
 {history}
+
+Document Context:
+{context}
 
 User Question:
 {query}
 """
     return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
 
-# ---- UI ----
-col1, col2 = st.columns(2)
-with col1:
-    resume_mode = st.checkbox("📄 Analyze as Resume", value=True)
-with col2:
-    web_search_enabled = st.checkbox("🌐 Enable Web Search (when you say `search web:`)", value=True)
+# 🧠 Streamlit UI
+st.set_page_config(page_title="Manna - AI Deck & Resume Evaluator", page_icon="🤖")
+st.title("🤖 Manna: Resume & Pitch Deck Evaluator")
 
-uploaded_file = st.file_uploader("📎 Upload Resume or Pitch Deck (PDF)", type=["pdf"])
-file_text = ""
-if uploaded_file:
-    file_bytes = uploaded_file.read()
-    file_text = extract_pdf_text(file_bytes)
-    st.success("✅ File uploaded and processed!")
+st.subheader("📄 Upload PDF (Pitch Deck or Resume)")
+file = st.file_uploader("Upload a PDF", type=["pdf"])
 
-# ---- Chat UI ----
-user_input = st.chat_input("💬 Ask anything or analyze your file")
+if file:
+    file_bytes = file.read()
+    text = extract_pdf_text(file_bytes)
+    sections = split_into_sections(text)
+    st.session_state.parsed_doc = text
+    st.session_state.sections = sections
+    st.session_state.file_uploaded = True
+
+    st.success("✅ File uploaded and parsed!")
+    if st.checkbox("Analyze as pitch deck?"):
+        eval_result = evaluate_pitch(sections)
+    else:
+        eval_result = evaluate_resume(sections)
+    st.markdown(eval_result)
+    st.session_state.chat_history.append(("Evaluate this file", eval_result))
+
+# 🔍 Chat input
+st.divider()
+user_input = st.chat_input("💬 Ask Manna anything (e.g. 'What traction is mentioned?' or 'search web: Nvidia news')")
 
 if user_input:
-    st.session_state.chat_history.append((user_input, ""))
-    response = None
-    fmt = infer_format(user_input)
+    format_type = infer_format(user_input)
+    is_web = user_input.lower().startswith("search web:")
+    user_query = user_input[len("search web:"):].strip() if is_web else user_input
 
-    if user_input.lower().startswith("search web:") and web_search_enabled:
-        search_query = user_input[len("search web:"):].strip()
-        response = run_web_search(search_query, fmt)
-
-    elif uploaded_file:
-        if resume_mode:
-            response = analyze_resume(file_text)
-        else:
-            response = analyze_pitch_deck(file_text)
+    if is_web:
+        answer = run_web_search(user_query, format_type)
+    elif st.session_state.file_uploaded and st.session_state.parsed_doc:
+        answer = answer_chat(user_query, context=st.session_state.parsed_doc)
     else:
-        response = answer_general_query(user_input)
+        answer = answer_chat(user_query)
 
-    st.session_state.chat_history[-1] = (user_input, response)
+    st.session_state.chat_history.append((user_input, answer))
 
-# ---- Display chat ----
+# 💬 Chat thread
+st.divider()
+st.subheader("🧵 Chat Thread")
 for i, (q, a) in enumerate(st.session_state.chat_history):
-    message(q, is_user=True, key=f"user_{i}")
-    if a:
-        message(a, is_user=False, key=f"bot_{i}")
+    st.markdown(f"**You:** {q}")
+    st.markdown(f"**Manna:** {a}")
