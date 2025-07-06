@@ -13,7 +13,7 @@ from difflib import get_close_matches
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 
-# Load environment variables
+# Load env vars
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 tavily_api_key = os.getenv("TAVILY_API_KEY")
@@ -21,7 +21,7 @@ if not openai_api_key or not tavily_api_key:
     st.error("❌ Please set both OPENAI_API_KEY and TAVILY_API_KEY in your .env file.")
     st.stop()
 
-# Initialize session state
+# Session state init
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "parsed_doc" not in st.session_state:
@@ -155,8 +155,9 @@ User Question:
 """
     return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
 
-# 🧠 Streamlit UI
+# --- Streamlit UI ---
 st.set_page_config(page_title="Manna - AI Deck & Resume Evaluator", page_icon="🤖")
+
 st.title("🤖 Manna: Resume & Pitch Deck Evaluator")
 
 st.subheader("📄 Upload PDF (Pitch Deck or Resume)")
@@ -180,6 +181,7 @@ if file:
     save_history()
 
 st.divider()
+
 user_input = st.chat_input("💬 Ask Manna anything (e.g. 'What traction is mentioned?' or 'search web: Nvidia news')")
 
 if user_input:
@@ -201,29 +203,68 @@ if user_input:
     st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     save_history()
 
-# 💬 Chat thread UI
+# --- Chat thread UI with styled chat bubbles ---
 st.markdown("## 🧵 Chat History")
-st.markdown("""
-<style>
-.scrollbox {
-  max-height: 500px;
-  overflow-y: auto;
-  border: 1px solid #ddd;
-  padding: 1rem;
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  margin-bottom: 1rem;
-}
-</style>
-""", unsafe_allow_html=True)
+
+st.markdown(
+    """
+    <style>
+    .scrollbox {
+      max-height: 500px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      padding: 1rem;
+      background-color: #f9f9f9;
+      border-radius: 12px;
+      margin-bottom: 1rem;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    .message {
+      margin-bottom: 1rem;
+      max-width: 80%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      box-shadow: 0 1px 3px rgb(0 0 0 / 0.1);
+    }
+    .user {
+      background-color: #2b6cb0;
+      color: white;
+      margin-left: auto;
+      border-bottom-right-radius: 2px;
+    }
+    .bot {
+      background-color: #e2e8f0;
+      color: #1a202c;
+      margin-right: auto;
+      border-bottom-left-radius: 2px;
+    }
+    .timestamp {
+      font-size: 0.7rem;
+      color: #718096;
+      margin-bottom: 4px;
+    }
+    .icon {
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 8px;
+      font-size: 1.2rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 st.markdown('<div class="scrollbox">', unsafe_allow_html=True)
 for q, a, t in st.session_state.chat_history:
-    st.markdown(f"""
-    <div style='margin-bottom: 20px;'>
-        <div><b>🕐 {t}</b></div>
-        <div style='margin: 5px 0;'><b>🧑 You:</b> {q}</div>
-        <div><b>🤖 Manna:</b> {a}</div>
-    </div>
-    """, unsafe_allow_html=True)
-st.markdown('</div>', unsafe_allo
+    # user message bubble
+    st.markdown(
+        f"""
+        <div class="timestamp">🕐 {t}</div>
+        <div class="message user"><span class="icon">👤</span><b>You:</b> {q}</div>
+        <div class="message bot"><span class="icon">🤖</span><b>Manna:</b> {a}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+st.markdown('</div>', unsafe_allow_html=True)
