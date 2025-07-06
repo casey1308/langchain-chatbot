@@ -129,14 +129,11 @@ Pitch Deck Text:
     return resp.content
 
 # General GPT chat with memory
-from streamlit_chat import message
-
 def answer_with_openai(query: str) -> str:
     try:
         history_context = "\n\n".join(
             f"User: {q}\nManna: {a}" for q, a in st.session_state.chat_history[-5:]
         )
-
         prompt = f"""
 You are Manna, a helpful AI assistant. Use the chat history and current user question to answer thoughtfully.
 
@@ -194,8 +191,10 @@ if user_input:
 
     st.session_state.chat_history[-1] = (user_input, answer)
 
-# Display chat
+# 🗨️ Display chat history using st.chat_message
 for i, (q, a) in enumerate(st.session_state.chat_history):
-    message(q, is_user=True, key=f"user_{i}")
+    with st.chat_message("user"):
+        st.markdown(q)
     if a:
-        message(a, is_user=False, key=f"bot_{i}")
+        with st.chat_message("ai"):
+            st.markdown(a)
