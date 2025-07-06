@@ -179,6 +179,9 @@ if user_input:
 # 💬 Chat thread
 st.divider()
 st.subheader("🧵 Chat Thread")
+
 for i, (q, a) in enumerate(st.session_state.chat_history):
-    st.markdown(f"**You:** {q}")
-    st.markdown(f"**Manna:** {a}")
+    with st.container():
+        st.markdown(f"🧑‍💻 **You:** {q}", unsafe_allow_html=True)
+        st.markdown(f"🤖 **Manna:** {a}", unsafe_allow_html=True)
+
