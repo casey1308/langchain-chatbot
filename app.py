@@ -1,3 +1,4 @@
+""
 import streamlit as st
 import os
 import tempfile
@@ -127,6 +128,15 @@ Pitch Deck Text:
     resp = llm.invoke(prompt)
     return resp.content
 
+# General GPT chat
+
+def answer_with_openai(query: str) -> str:
+    try:
+        chat = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
+        return chat.invoke(query).content
+    except Exception as e:
+        return f"❌ GPT error: {str(e)}"
+
 # Streamlit UI
 st.set_page_config(page_title="Manna - AI VC & Resume Evaluator", page_icon="🤖")
 st.title("🤖 Manna: Resume & Pitch Deck Scorer")
@@ -147,7 +157,7 @@ if uploaded_file:
     st.success("✅ File uploaded successfully")
 
 # Chat input
-user_input = st.text_input("💬 Ask something about your file or say 'search web: ...'")
+user_input = st.text_input("💬 Ask something about your file or just use GPT")
 
 if user_input:
     st.markdown(f"**You:** {user_input}")
@@ -159,14 +169,16 @@ if user_input:
     if wants_web:
         query = user_input[len("search web:"):].strip()
         answer = run_web_search(query, fmt)
-    elif resume_mode and file_bytes:
-        answer = analyze_resume(file_bytes, fmt)
-    elif not resume_mode and file_bytes:
-        answer = analyze_deck(file_bytes, fmt)
+    elif file_bytes:
+        if resume_mode:
+            answer = analyze_resume(file_bytes, fmt)
+        else:
+            answer = analyze_deck(file_bytes, fmt)
     else:
-        st.warning("⚠️ Please upload a document first.")
+        answer = answer_with_openai(user_input)
 
     if answer:
         st.markdown("**Manna:**")
         st.markdown(answer)
         st.session_state.chat_history.append((user_input, answer))
+""
