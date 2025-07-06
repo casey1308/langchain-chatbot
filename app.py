@@ -31,7 +31,7 @@ def clean_text(text: str) -> str:
     text = re.sub(r"\n{2,}", "\n", text)
     return text.strip()
 
-# Infer response format
+# Format inference
 def infer_format_from_query(query: str) -> str:
     q = query.lower()
     if "hypher" in q or "hierarchy" in q:
@@ -42,7 +42,7 @@ def infer_format_from_query(query: str) -> str:
         return "table"
     return "summary"
 
-# Web search + LLM summary
+# Web search
 def run_web_search(query: str, format_type="summary") -> str:
     try:
         search = TavilySearchAPIWrapper()
@@ -73,13 +73,12 @@ def run_web_search(query: str, format_type="summary") -> str:
     except Exception as e:
         return f"🌐 Web search failed: {str(e)}"
 
-# PDF RAG chain
+# Pitch deck QA chain
 def build_qa_chain(uploaded_file) -> RetrievalQA:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         tmp.write(uploaded_file.read())
         pdf_path = tmp.name
 
-    # FIX: Make sure `pypdf` is installed!
     documents = PyPDFLoader(pdf_path).load()
     splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     chunks = splitter.split_documents(documents)
@@ -99,6 +98,31 @@ def build_qa_chain(uploaded_file) -> RetrievalQA:
         chain_type_kwargs={"prompt": prompt},
     )
 
+# Resume analyzer
+def analyze_resume(file, format_type="table") -> str:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(file.read())
+        pdf_path = tmp.name
+
+    loader = PyPDFLoader(pdf_path)
+    pages = loader.load()
+    text = "\n\n".join([p.page_content for p in pages])
+
+    prompt = (
+        "You are a resume reviewer AI. Analyze the resume text below.\n"
+        "Provide a structured evaluation of:\n"
+        "- Skills match for Product/VC/Data roles\n"
+        "- Formatting issues\n"
+        "- Suggestions to improve\n"
+        "- Score out of 10 for Readability, ATS Match, and Role Fit\n\n"
+        f"Return in this format: {format_type}\n\n"
+        f"Resume Text:\n{text}"
+    )
+
+    llm = ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key)
+    response = llm.invoke(prompt)
+    return response.content
+
 # Streamlit UI
 st.set_page_config(page_title="Manna - Your AI VC Assistant", page_icon="🤖")
 st.title("🤖 Meet Manna - Your AI VC Evaluator")
@@ -108,16 +132,23 @@ if "qa_chain" not in st.session_state:
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# File upload
-uploaded_file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
-if uploaded_file:
-    with st.spinner("📚 Reading and indexing..."):
-        st.session_state.qa_chain = build_qa_chain(uploaded_file)
-    st.success("✅ Pitch deck processed!")
+resume_mode = st.checkbox("📄 Analyze as Resume (instead of Pitch Deck)")
 
-# Greet
+uploaded_file = st.file_uploader("Upload a PDF file (Resume or Deck)", type=["pdf"])
+
+if uploaded_file:
+    with st.spinner("📚 Reading and analyzing..."):
+        if resume_mode:
+            answer = analyze_resume(uploaded_file)
+            st.session_state.chat_history.append(("Uploaded Resume", answer))
+            st.session_state.qa_chain = None
+        else:
+            st.session_state.qa_chain = build_qa_chain(uploaded_file)
+            st.success("✅ Pitch deck processed!")
+
+# Greeting
 with st.chat_message("ai"):
-    st.markdown("Hi! I'm **Manna**, your VC evaluator. Upload a deck or ask any scoring questions.")
+    st.markdown("Hi! I'm **Manna**, your AI VC evaluator. Upload a resume or pitch deck and ask questions.")
 
 # Voice input
 st.subheader("🎙️ Speak to Manna")
@@ -151,7 +182,9 @@ if user_input:
     format_type = infer_format_from_query(user_input)
 
     try:
-        if st.session_state.qa_chain:
+        if resume_mode:
+            answer = analyze_resume(uploaded_file, format_type)
+        elif st.session_state.qa_chain:
             answer = st.session_state.qa_chain.run({
                 "question": user_input,
                 "format": format_type
@@ -159,14 +192,13 @@ if user_input:
             if "Insufficient data" in answer:
                 raise ValueError("Fallback")
         else:
-            raise ValueError("No PDF uploaded")
+            raise ValueError("No document uploaded")
 
     except:
-        with st.spinner("🌐 Not enough info in deck. Searching the web..."):
+        with st.spinner("🌐 Not enough info. Searching the web..."):
             answer = run_web_search(user_input, format_type)
 
     with st.chat_message("ai"):
         st.markdown(answer)
 
-    # Store to history
     st.session_state.chat_history.append((user_input, answer))
