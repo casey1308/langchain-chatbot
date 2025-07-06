@@ -6,6 +6,8 @@ import openai
 import PyPDF2
 import re
 from io import BytesIO
+import streamlit.components.v1 as components
+from datetime import datetime
 
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
@@ -27,18 +29,21 @@ if "file_uploaded" not in st.session_state:
     st.session_state.file_uploaded = False
 
 # Clean text
+
 def clean_text(text: str) -> str:
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     text = re.sub(r"\n{2,}", "\n", text)
     return text.strip()
 
 # PDF text extractor
+
 def extract_pdf_text(file_bytes: bytes) -> str:
     reader = PyPDF2.PdfReader(BytesIO(file_bytes))
     text = "\n".join(page.extract_text() or "" for page in reader.pages)
     return clean_text(text)
 
 # Section-based chunking
+
 def split_into_sections(text: str) -> dict:
     sections = {}
     current = "General"
@@ -55,6 +60,7 @@ def split_into_sections(text: str) -> dict:
     return {k: "\n".join(v) for k, v in sections.items()}
 
 # Format inference
+
 def infer_format(query: str) -> str:
     query = query.lower()
     if "table" in query or "score" in query:
@@ -66,6 +72,7 @@ def infer_format(query: str) -> str:
     return "summary"
 
 # Evaluate pitch deck
+
 def evaluate_pitch(sections: dict) -> str:
     criteria = [
         "Market Opportunity",
@@ -87,6 +94,7 @@ def evaluate_pitch(sections: dict) -> str:
     return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
 
 # Evaluate resume
+
 def evaluate_resume(sections: dict) -> str:
     prompt = (
         "You are a resume reviewer AI. Score the resume on the following sections: "
@@ -99,6 +107,7 @@ def evaluate_resume(sections: dict) -> str:
     return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content
 
 # Web search via Tavily
+
 def run_web_search(query: str, format_type: str = "summary") -> str:
     try:
         search = TavilySearchAPIWrapper()
@@ -119,8 +128,9 @@ Query: {query}
         return f"🌐 Web search failed: {str(e)}"
 
 # Normal GPT response
+
 def answer_chat(query: str, context: str = "") -> str:
-    history = "\n".join([f"User: {u}\nManna: {a}" for u, a in st.session_state.chat_history[-5:]])
+    history = "\n".join([f"User: {u}\nManna: {a}" for u, a, t in st.session_state.chat_history[-5:]])
     prompt = f"""
 You are Manna, an intelligent assistant. Use the conversation history and any provided context.
 
@@ -156,7 +166,7 @@ if file:
     else:
         eval_result = evaluate_resume(sections)
     st.markdown(eval_result)
-    st.session_state.chat_history.append(("Evaluate this file", eval_result))
+    st.session_state.chat_history.append(("Evaluate this file", eval_result, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
 # 🔍 Chat input
 st.divider()
@@ -174,25 +184,22 @@ if user_input:
     else:
         answer = answer_chat(user_query)
 
-    st.session_state.chat_history.append((user_input, answer))
+    st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
 # 💬 Chat thread
-import streamlit.components.v1 as components
+if st.button("🧹 Clear Chat"):
+    st.session_state.chat_history = []
+    st.experimental_rerun()
 
 st.markdown("## 🧵 Conversation Thread")
-for i, (q, a) in enumerate(st.session_state.chat_history):
-    st.markdown(
-        f"""
-        <div style="background-color:#f0f2f6; padding: 12px; border-radius: 10px; margin-bottom: 10px;">
-            <strong style="color:#1a1a1a;">🧑‍💻 You</strong><br/>
-            <span style="color:#333;">{q}</span>
-        </div>
-        <div style="background-color:#dbeafe; padding: 12px; border-radius: 10px; margin-bottom: 20px;">
-            <strong style="color:#1a1a1a;">🤖 Manna</strong><br/>
-            <span style="color:#111827;">{a}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
-
+chat_html = """
+<div style="max-height: 400px; overflow-y: auto; padding-right: 10px;">
+"""
+for i, (q, a, t) in enumerate(st.session_state.chat_history):
+    chat_html += f"""
+    <p style="margin-bottom: 0;"><b>🧑‍💻 You</b> <span style="color: gray; font-size: 12px;">({t})</span><br>{q}</p>
+    <p style="margin-top: 4px; margin-bottom: 20px;"><b>🤖 Manna</b> <span style="color: gray; font-size: 12px;">({t})</span><br>{a}</p>
+    """
+chat_html += "</div>"
+st.markdown(chat_html, unsafe_allow_html=True)
