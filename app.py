@@ -182,23 +182,22 @@ if user_input:
     format_type = infer_format_from_query(user_input)
 
     try:
-        if resume_mode:
+        if resume_mode and uploaded_file:
             answer = analyze_resume(uploaded_file, format_type)
         elif st.session_state.qa_chain:
             answer = st.session_state.qa_chain.run({
                 "question": user_input,
                 "format": format_type
             })
-            if "Insufficient data" in answer:
-                raise ValueError("Fallback")
         else:
-            raise ValueError("No document uploaded")
+            st.warning("⚠️ Please upload a file first.")
+            answer = None
 
-    except:
-        with st.spinner("🌐 Not enough info. Searching the web..."):
-            answer = run_web_search(user_input, format_type)
+    except Exception as e:
+        st.error(f"❌ Error processing your file: {str(e)}")
+        answer = None
 
-    with st.chat_message("ai"):
-        st.markdown(answer)
-
-    st.session_state.chat_history.append((user_input, answer))
+    if answer:
+        with st.chat_message("ai"):
+            st.markdown(answer)
+        st.session_state.chat_history.append((user_input, answer))
