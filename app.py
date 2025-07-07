@@ -15,6 +15,7 @@ from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 tavily_api_key = os.getenv("TAVILY_API_KEY")
+
 if not openai_api_key or not tavily_api_key:
     st.error("❌ Please set both OPENAI_API_KEY and TAVILY_API_KEY in your .env file.")
     st.stop()
@@ -42,7 +43,11 @@ def extract_pdf_text(file_bytes):
 def split_into_sections(text):
     sections = {}
     current = "General"
-    headings = ["summary", "objective", "education", "experience", "projects", "skills", "market", "team", "business model", "financials", "revenue", "traction", "competition", "go-to-market", "ask", "funding"]
+    headings = [
+        "summary", "objective", "education", "experience", "projects", "skills",
+        "market", "team", "business model", "financials", "revenue", "traction",
+        "competition", "go-to-market", "ask", "funding"
+    ]
     for line in text.splitlines():
         l = line.strip()
         if any(h in l.lower() for h in headings):
@@ -85,17 +90,6 @@ def infer_format(query):
     if "hierarchy" in q:
         return "hypher"
     return "summary"
-
-def generate_trend_score_table():
-    return """
-| Parameter                        | Score | Notes                                  | Suggestion                               |
-|----------------------------------|-------|----------------------------------------|------------------------------------------|
-| Market Opportunity               | 8/10  | Clear TAM/SAM/SOM provided.            | Add citation or third-party validation.  |
-| Competitive Landscape            | 6/10  | Lists competitors but lacks analysis.  | Provide SWOT or differentiation matrix.  |
-| Financial Model & Projections    | 7/10  | Includes revenue & cost model.         | Improve clarity on margins/EBITDA.       |
-| Team Experience & Capability     | 9/10  | Strong founder & domain expertise.     | Add track record of execution.           |
-| Ask & Use of Funds               | 5/10  | General ask mentioned.                 | Break down how funds will be used.       |
-"""
 
 def evaluate_pitch(sections):
     criteria = [
@@ -155,29 +149,42 @@ st.markdown("""
 body {
     background-color: #0f0f0f;
     color: white;
+    font-family: 'Segoe UI', sans-serif;
 }
-.stChatMessage.user, .user-bubble {
-    background-color: #202020;
-    color: white;
-    padding: 12px;
-    border-radius: 16px;
-    margin: 10px 0;
-    width: fit-content;
-    max-width: 75%;
+div.user-bubble, div.assistant-bubble {
+    display: inline-block;
+    padding: 12px 16px;
+    border-radius: 18px;
+    margin: 6px 0;
+    font-size: 15px;
+    line-height: 1.4;
+    max-width: 80%;
+    word-wrap: break-word;
+    box-shadow: 0px 0px 10px rgba(0,0,0,0.4);
 }
-.stChatMessage.assistant, .assistant-bubble {
-    background-color: #2c2c4a;
+div.user-bubble {
+    background-color: #1e1e1e;
     color: white;
-    padding: 12px;
-    border-radius: 16px;
-    margin: 10px 0;
+    align-self: flex-start;
+    border-top-left-radius: 2px;
+}
+div.assistant-bubble {
+    background-color: #3b3b5b;
+    color: white;
+    align-self: flex-end;
+    border-top-right-radius: 2px;
     margin-left: auto;
-    width: fit-content;
-    max-width: 75%;
 }
 [data-testid="stChatInput"] {
     background: #222;
-    border-radius: 12px;
+    color: white;
+    border-radius: 10px;
+    padding: 10px;
+}
+div.user-bubble:hover, div.assistant-bubble:hover {
+    background-color: #4a4a6a;
+    transition: background-color 0.3s ease;
+    cursor: default;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -203,8 +210,6 @@ if user_input:
     with st.spinner("🤖 Thinking..."):
         if not st.session_state.file_uploaded:
             answer = answer_chat(query)
-        elif fmt == "trend_table":
-            answer = generate_trend_score_table()
         elif is_web:
             answer = run_web_search(query, fmt)
         else:
@@ -215,7 +220,7 @@ if user_input:
                     answer = "\n".join([f"- **{k.replace('_',' ').title()}**: {metrics.get(k, '❌ Not found')}" for k in ["revenue", "ebitda", "market_size", "funding_ask", "founder_name"]])
                 else:
                     answer = "😕 I couldn't find any financial metrics in the document."
-            elif query.lower().strip() in ["evaluate this pitch", "score pitch"]:
+            elif query.lower().strip() in ["evaluate this pitch", "score pitch", "trend score", "generate score"]:
                 answer = evaluate_pitch(st.session_state.sections)
             elif query.lower().strip() in ["evaluate this resume", "score resume"]:
                 answer = evaluate_resume(st.session_state.sections)
@@ -225,7 +230,7 @@ if user_input:
     st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     save_history()
 
-# Render chat
+# ✅ Render WhatsApp-style bubbles
 for user, bot, ts in st.session_state.chat_history:
     st.markdown(f'<div class="user-bubble">🧍‍♂️ {user}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="assistant-bubble">🤖 {bot}</div>', unsafe_allow_html=True)
