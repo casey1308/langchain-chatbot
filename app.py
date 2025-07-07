@@ -219,18 +219,12 @@ if user_input:
                 answer = evaluate_resume(st.session_state.sections)
             else:
                 contextual_answer = answer_chat(query, context=st.session_state.parsed_doc)
-                if any(kw in contextual_answer.lower() for kw in [
-                    "not mentioned", "no information", "not found", "couldn’t find", "no data"
-                ]):
+                if any(kw in contextual_answer.lower() for kw in ["not mentioned", "no information", "not found", "couldn’t find", "no data"]):
                     answer = answer_chat(query)
                 else:
                     answer = contextual_answer
 
-
-    # Save chat
-    st.session_state.chat_history.append(
-        (user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    )
+    st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     save_history()
 
 # ✅ Final, clean left-right message layout
