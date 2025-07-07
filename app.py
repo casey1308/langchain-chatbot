@@ -192,17 +192,16 @@ if file:
     st.success("✅ PDF parsed successfully!")
 
 user_input = st.chat_input("💬 Ask me anything...")
-
 if user_input:
     fmt = infer_format(user_input)
     is_web = user_input.lower().startswith("search web:")
     query = user_input[len("search web:"):].strip() if is_web else user_input
 
     with st.spinner("🤖 Thinking..."):
-        if not st.session_state.file_uploaded:
-            answer = answer_chat(query)
-        elif is_web:
+        if is_web:
             answer = run_web_search(query, fmt)
+        elif not st.session_state.file_uploaded:
+            answer = answer_chat(query)
         else:
             keywords = ["revenue", "ebitda", "market size", "ask", "funding", "founder"]
             if any(k in query.lower() for k in keywords):
@@ -219,15 +218,14 @@ if user_input:
             elif query.lower().strip() in ["evaluate this resume", "score resume"]:
                 answer = evaluate_resume(st.session_state.sections)
             else:
-                # Try contextual answer first
                 contextual_answer = answer_chat(query, context=st.session_state.parsed_doc)
                 if any(kw in contextual_answer.lower() for kw in [
                     "not mentioned", "no information", "not found", "couldn’t find", "no data"
                 ]):
-                    # Fallback to general chat if PDF lacks answer
                     answer = answer_chat(query)
                 else:
                     answer = contextual_answer
+
 
     # Save chat
     st.session_state.chat_history.append(
