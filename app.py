@@ -144,50 +144,54 @@ Question:
 # --- Streamlit UI ---
 st.set_page_config(page_title="Manna", page_icon="🤖")
 
+# ✅ Render left-right aligned chat messages without emojis
 st.markdown("""
 <style>
-body {
-    background-color: #0f0f0f;
-    color: white;
-    font-family: 'Segoe UI', sans-serif;
+.chat-container {
+    display: flex;
+    flex-direction: column;
 }
-div.user-bubble, div.assistant-bubble {
-    display: inline-block;
+.chat-bubble {
+    max-width: 80%;
     padding: 12px 16px;
-    border-radius: 18px;
     margin: 6px 0;
+    border-radius: 18px;
     font-size: 15px;
     line-height: 1.4;
-    max-width: 80%;
     word-wrap: break-word;
-    box-shadow: 0px 0px 10px rgba(0,0,0,0.4);
+    box-shadow: 0 0 6px rgba(0,0,0,0.3);
 }
-div.user-bubble {
-    background-color: #1e1e1e;
-    color: white;
+.user-msg {
     align-self: flex-start;
+    background-color: #1f1f1f;
+    color: white;
     border-top-left-radius: 2px;
 }
-div.assistant-bubble {
-    background-color: #3b3b5b;
-    color: white;
+.bot-msg {
     align-self: flex-end;
-    border-top-right-radius: 2px;
-    margin-left: auto;
-}
-[data-testid="stChatInput"] {
-    background: #222;
+    background-color: #3a3a5a;
     color: white;
-    border-radius: 10px;
-    padding: 10px;
+    border-top-right-radius: 2px;
 }
-div.user-bubble:hover, div.assistant-bubble:hover {
-    background-color: #4a4a6a;
-    transition: background-color 0.3s ease;
-    cursor: default;
+.label {
+    font-size: 13px;
+    color: #999;
+    margin-bottom: 3px;
 }
 </style>
 """, unsafe_allow_html=True)
+
+# ✅ Loop and display all chat messages
+for user, bot, ts in st.session_state.chat_history:
+    st.markdown(f"""
+    <div class="chat-container">
+        <div class="label">You:</div>
+        <div class="chat-bubble user-msg">{user}</div>
+        <div class="label" style="text-align:right;">Manna:</div>
+        <div class="chat-bubble bot-msg">{bot}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
 
 st.title("🤖 Manna: Resume & Pitch Deck Evaluator")
 file = st.file_uploader("📄 Upload your PDF", type=["pdf"])
