@@ -144,7 +144,6 @@ Question:
 # --- Streamlit UI ---
 st.set_page_config(page_title="Manna", page_icon="🤖")
 
-# ✅ Render left-right aligned chat messages without emojis
 st.markdown("""
 <style>
 .chat-container {
@@ -181,18 +180,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ✅ Loop and display all chat messages
-for user, bot, ts in st.session_state.chat_history:
-    st.markdown(f"""
-    <div class="chat-container">
-        <div class="label">You:</div>
-        <div class="chat-bubble user-msg">{user}</div>
-        <div class="label" style="text-align:right;">Manna:</div>
-        <div class="chat-bubble bot-msg">{bot}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-
 st.title("🤖 Manna: Resume & Pitch Deck Evaluator")
 file = st.file_uploader("📄 Upload your PDF", type=["pdf"])
 
@@ -221,9 +208,9 @@ if user_input:
             if any(k in query.lower() for k in keywords):
                 metrics = extract_metrics(st.session_state.parsed_doc)
                 if any(metrics.values()):
-                    answer = "\n".join([f"- **{k.replace('_',' ').title()}**: {metrics.get(k, '❌ Not found')}" for k in ["revenue", "ebitda", "market_size", "funding_ask", "founder_name"]])
+                    answer = "\n".join([f"- **{k.replace('_',' ').title()}**: {metrics.get(k, 'Not found')}" for k in ["revenue", "ebitda", "market_size", "funding_ask", "founder_name"]])
                 else:
-                    answer = "😕 I couldn't find any financial metrics in the document."
+                    answer = "I couldn't find any financial metrics in the document."
             elif query.lower().strip() in ["evaluate this pitch", "score pitch", "trend score", "generate score"]:
                 answer = evaluate_pitch(st.session_state.sections)
             elif query.lower().strip() in ["evaluate this resume", "score resume"]:
@@ -234,7 +221,13 @@ if user_input:
     st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     save_history()
 
-# ✅ Render WhatsApp-style bubbles
+# ✅ Final, clean left-right message layout
 for user, bot, ts in st.session_state.chat_history:
-    st.markdown(f'<div class="user-bubble">🧍‍♂️ {user}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="assistant-bubble">🤖 {bot}</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="chat-container">
+        <div class="label">You:</div>
+        <div class="chat-bubble user-msg">{user}</div>
+        <div class="label" style="text-align:right;">Manna:</div>
+        <div class="chat-bubble bot-msg">{bot}</div>
+    </div>
+    """, unsafe_allow_html=True)
