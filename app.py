@@ -208,7 +208,10 @@ if user_input:
             if any(k in query.lower() for k in keywords):
                 metrics = extract_metrics(st.session_state.parsed_doc)
                 if any(metrics.values()):
-                    answer = "\n".join([f"- **{k.replace('_',' ').title()}**: {metrics.get(k, 'Not found')}" for k in ["revenue", "ebitda", "market_size", "funding_ask", "founder_name"]])
+                    answer = "\n".join([
+                        f"- **{k.replace('_',' ').title()}**: {metrics.get(k, 'Not found')}"
+                        for k in ["revenue", "ebitda", "market_size", "funding_ask", "founder_name"]
+                    ])
                 else:
                     answer = "I couldn't find any financial metrics in the document."
             elif query.lower().strip() in ["evaluate this pitch", "score pitch", "trend score", "generate score"]:
@@ -216,9 +219,20 @@ if user_input:
             elif query.lower().strip() in ["evaluate this resume", "score resume"]:
                 answer = evaluate_resume(st.session_state.sections)
             else:
-                answer = answer_chat(query, context=st.session_state.parsed_doc)
+                # Try contextual answer first
+                contextual_answer = answer_chat(query, context=st.session_state.parsed_doc)
+                if any(kw in contextual_answer.lower() for kw in [
+                    "not mentioned", "no information", "not found", "couldn’t find", "no data"
+                ]):
+                    # Fallback to general chat if PDF lacks answer
+                    answer = answer_chat(query)
+                else:
+                    answer = contextual_answer
 
-    st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    # Save chat
+    st.session_state.chat_history.append(
+        (user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    )
     save_history()
 
 # ✅ Final, clean left-right message layout
