@@ -123,7 +123,8 @@ Please return:
 4. Bullet list of follow-up documents if score ≥ 2.25.
 """
 
-    return ChatOpenAI(model="gpt-4", openai_api_key=openai_api_key).invoke(prompt).content.strip()
+    return ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key).invoke(prompt).content.strip()
+
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Manna VC Evaluator", page_icon="🤖")
