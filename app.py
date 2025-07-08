@@ -58,52 +58,82 @@ def match_section(key, sections):
     return "Not mentioned"
 
 # Strict evaluation format with weightage
-def evaluate_pitch_table(sections):
+def evaluate_pitch_stage1(sections):
+    # List of evaluation criteria with priorities
     criteria = [
-        ("Problem Statement", 0.10),
-        ("Offered Solution", 0.15),
-        ("Market Size", 0.10),
-        ("Founder Background", 0.05),
-        ("Business Model", 0.15),
-        ("Stage of the Business", 0.10),
-        ("Revenue Model", 0.15),
-        ("Tech Integration", 0.10),
-        ("Traction", 0.10),
+        ("Problem Statement", "High"),
+        ("Offered Solution", "Medium"),
+        ("Market Size", "Low"),
+        ("Founder Background", "High"),
+        ("Business Model", "High"),
+        ("Stage of the Business", "Medium"),
+        ("Revenue Model", "Medium"),
+        ("Tech Integration", "High"),
+        ("Traction", "Medium"),
+        ("Team Dynamics", "High"),
+        ("Team Size", "Low"),
+        ("Cap Table", "High"),
+        ("Competitive Landscape", "High"),
+        ("Additional Investment Requirement", "High"),
+        ("Valuation", "Medium"),
+        ("Regulatory Impact", "Low"),
+        ("Exit Opportunity", "Low"),
     ]
 
-    prompt = "You are a startup evaluator AI.\n"
-    prompt += "For each criterion below, evaluate based on the provided text.\n"
-    prompt += "Give a markdown table:\n\n"
-    prompt += "| Criterion | Score (/5) | Weightage | Remarks | Suggestions |\n"
-    prompt += "|-----------|-------------|-----------|---------|-------------|\n"
+    # Map priorities to weightages
+    weightage_map = {
+        "High": 0.08,
+        "Medium": 0.05,
+        "Low": 0.03,
+    }
 
-    for name, weight in criteria:
+    # Prepare the prompt
+    prompt = (
+        "You are a startup evaluation analyst AI.\n"
+        "You will evaluate the startup pitch using the following format.\n"
+        "For each criterion:\n"
+        "- Assign a score from 1 to 5 based on content\n"
+        "- Use the provided weightage\n"
+        "- Give one short remark\n"
+        "- Suggest one improvement\n\n"
+        "Respond ONLY in strict markdown table format like this:\n\n"
+        "| Criterion | Score (/5) | Weightage | Remarks | Suggestions |\n"
+        "|-----------|-------------|-----------|---------|-------------|\n"
+    )
+
+    # Append all evaluation sections with priority
+    for name, priority in criteria:
+        weight = weightage_map[priority]
         section_text = match_section(name, sections)
-        prompt += f"\n## {name}\n{section_text}\n"
+        prompt += f"\n## {name} (Priority: {priority}, Weightage: {weight})\n{section_text}\n"
 
-    prompt += """
-Then return the output in this format:
+    # Add instruction to compute total score and verdict
+    prompt += (
+        "\nAfter the table, compute the final weighted score as:\n"
+        "**Final Weighted Score = sum of (score × weightage)**\n\n"
+        "**Verdict:**\n"
+        "- ✅ Consider for Investment: score ≥ 3.0\n"
+        "- ⚠️ Second Opinion: 2.25 ≤ score < 3.0\n"
+        "- ❌ Pass: score < 2.25\n\n"
+        "**Follow-Up Documents Required for Stage 2:**\n"
+        "- Financial Model (with HR Plan)\n"
+        "- YTD MIS\n"
+        "- Cap Table + ESOP\n"
+        "- Startup India Certificate\n"
+        "- Prior Fund Raise Journey\n"
+        "- Due Diligence Report\n"
+        "- Borrowings or Legal Defaults\n"
+        "- Founder References & Background Checks\n"
+    )
 
-| Criterion | Score (/5) | Weightage | Remarks | Suggestions |
-|-----------|-------------|-----------|---------|-------------|
-| Example   | 4           | 0.15      | Good effort | Add KPIs    |
-| ...       | ...         | ...       | ...        | ...         |
-
-At the end, calculate and show:
-
-Final Weighted Score (out of 5): X.XX  
-Verdict: [Choose: "Consider", "Second Opinion", "Pass"]
-
-Suggested Follow-up Documents:
-- List bullet points like Financial Model, Cap Table, Due Diligence etc.
-"""
-
+    # Run it through GPT-4o
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
         result = llm.invoke(prompt)
         return result.content.strip()
     except Exception as e:
         return f"⚠️ Error during evaluation: {str(e)}"
+
 
 def run_web_search(query):
     try:
