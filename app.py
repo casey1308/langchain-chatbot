@@ -96,7 +96,7 @@ def evaluate_pitch_stage1(sections):
 
     prompt += "\nReturn scores out of 5 only. Be strict but fair. Add 1-2 line remark for each.\n"
 
-    result = ChatOpenAI(model="gpt-4", openai_api_key=openai_api_key).invoke(prompt).content.strip()
+    result = ChatOpenAI(model_name="gpt-4", openai_api_key=openai_api_key).invoke(prompt).content.strip()
     return result
 
 # Main UI
