@@ -20,17 +20,14 @@ if not openai_api_key or not tavily_api_key:
     st.error("❌ Please set both OPENAI_API_KEY and TAVILY_API_KEY in your .env file.")
     st.stop()
 
-# Init session state
 for key in ["chat_history", "parsed_doc", "file_uploaded", "sections"]:
     if key not in st.session_state:
         st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
 
-# Save chat history
 def save_history():
     with open("chat_history.json", "w") as f:
         json.dump(st.session_state.chat_history, f, indent=2)
 
-# --- Utility functions ---
 def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     return re.sub(r"\n{2,}", "\n", text).strip()
@@ -103,6 +100,51 @@ def evaluate_pitch(sections):
         matched = match_section(crit, sections)
         prompt += f"\n## {crit}\n{matched}\n"
     return ChatOpenAI(model="gpt-3.5-turbo", openai_api_key=openai_api_key).invoke(prompt).content.strip()
+
+def evaluate_pitch_stage1():
+    parameters = [
+        {"name": "Problem Statement", "score": 2, "weight": 0.08},
+        {"name": "Offered Solution", "score": 4, "weight": 0.05},
+        {"name": "Market Size", "score": 3, "weight": 0.03},
+        {"name": "Founder Background", "score": 3, "weight": 0.08},
+        {"name": "Business Model", "score": 1.5, "weight": 0.08},
+        {"name": "Stage of the Business", "score": 0.5, "weight": 0.05},
+        {"name": "Revenue Model", "score": 2, "weight": 0.05},
+        {"name": "Tech Integration", "score": 4, "weight": 0.08},
+        {"name": "Traction", "score": 0.5, "weight": 0.05},
+        {"name": "Team Dynamics", "score": 2, "weight": 0.08},
+        {"name": "Team Size", "score": 1, "weight": 0.03},
+        {"name": "Cap Table", "score": 2, "weight": 0.08},
+        {"name": "Competitive Landscape", "score": 3, "weight": 0.08},
+        {"name": "Additional Investment Requirement", "score": 1, "weight": 0.08},
+        {"name": "Valuation", "score": 2.5, "weight": 0.05},
+        {"name": "Regulatory Impact", "score": 4, "weight": 0.03},
+        {"name": "Exit Opportunity", "score": 3, "weight": 0.03}
+    ]
+
+    total_score = round(sum(p["score"] * p["weight"] for p in parameters), 2)
+
+    if total_score >= 3.0:
+        verdict = "✅ **Consider for Investment**"
+        color = "green"
+    elif total_score >= 2.25:
+        verdict = "⚠️ **Second Opinion Needed**"
+        color = "orange"
+    else:
+        verdict = "❌ **Pass**"
+        color = "red"
+
+    report = f"### 📊 VC Scorecard Evaluation (Stage 1/3)\n\n"
+    report += "| Parameter | Score (/5) | Weight |\n|---|---|---|\n"
+    for p in parameters:
+        report += f"| {p['name']} | {p['score']} | {p['weight']} |\n"
+    report += f"\n**Total Weighted Score:** `{total_score} / 5.0`"
+    report += f"\n\n<span style='color:{color}; font-weight:bold'>{verdict}</span>"
+
+    if total_score < 2.25:
+        report += "\n\n📌 Suggested Next Docs:\n- Financial Model\n- YTD MIS\n- Cap Table\n- Due Diligence Report"
+
+    return report
 
 def evaluate_resume(sections):
     prompt = "You are a resume reviewer AI. Score the resume on sections: Summary, Education, Experience, Projects, Skills, Formatting. Return markdown table.\n\n"
@@ -213,8 +255,11 @@ if user_input:
                     ])
                 else:
                     answer = "I couldn't find any financial metrics in the document."
-            elif query.lower().strip() in ["evaluate this pitch", "score pitch", "trend score", "generate score"]:
-                answer = evaluate_pitch(st.session_state.sections)
+            elif query.lower().strip() in [
+                "evaluate this pitch", "score pitch", "trend score", "generate score",
+                "run stage 1", "vc scorecard", "preliminary evaluation", "stage 1 score"
+            ]:
+                answer = evaluate_pitch_stage1()
             elif query.lower().strip() in ["evaluate this resume", "score resume"]:
                 answer = evaluate_resume(st.session_state.sections)
             else:
@@ -227,7 +272,6 @@ if user_input:
     st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     save_history()
 
-# ✅ Final, clean left-right message layout
 for user, bot, ts in st.session_state.chat_history:
     st.markdown(f"""
     <div class="chat-container">
