@@ -11,54 +11,38 @@ from difflib import get_close_matches
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 
-# Load environment variables
+# Load API keys
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 tavily_api_key = os.getenv("TAVILY_API_KEY")
 
 if not openai_api_key or not tavily_api_key:
-    st.error("❌ Please set both OPENAI_API_KEY and TAVILY_API_KEY in your .env file.")
+    st.error("❌ Missing API keys! Please add OPENAI_API_KEY and TAVILY_API_KEY to your .env file.")
     st.stop()
 
-# --- Session State Init ---
-for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "logged_in"]:
+# Initialize session state
+for key in ["chat_history", "parsed_doc", "file_uploaded", "sections"]:
     if key not in st.session_state:
-        if key == "chat_history":
-            st.session_state[key] = []
-        elif key == "logged_in":
-            st.session_state[key] = True  # Set to False if you’re actually implementing login
-        else:
-            st.session_state[key] = None if key == "sections" else False
+        st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
 
-# Save chat history
-def save_history():
-    with open("chat_history.json", "w") as f:
-        json.dump(st.session_state.chat_history, f, indent=2)
-
-# --- Utility Functions ---
+# Utility functions
 def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     return re.sub(r"\n{2,}", "\n", text).strip()
 
 def extract_pdf_text(file_bytes):
     reader = PyPDF2.PdfReader(BytesIO(file_bytes))
-    text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    return clean_text(text)
+    return clean_text("\n".join(page.extract_text() or "" for page in reader.pages))
 
 def split_into_sections(text):
     sections = {}
     current = "General"
-    headings = [
-        "summary", "objective", "education", "experience", "projects", "skills",
-        "market", "team", "business model", "financials", "revenue", "traction",
-        "competition", "go-to-market", "ask", "funding"
-    ]
+    headings = ["summary", "problem", "solution", "team", "market", "product", "traction", "revenue", "financial", "competition", "ask", "cap table", "valuation", "exit"]
     for line in text.splitlines():
-        l = line.strip()
-        if any(h in l.lower() for h in headings):
-            current = l.strip()
+        if any(h in line.lower() for h in headings):
+            current = line.strip()
             sections[current] = []
-        sections.setdefault(current, []).append(l)
+        sections.setdefault(current, []).append(line)
     return {k: "\n".join(v) for k, v in sections.items()}
 
 def match_section(key, sections):
@@ -69,64 +53,93 @@ def match_section(key, sections):
                 return sections[k]
     return "Not mentioned"
 
-# --- Stage 1 Evaluation with Web Insights ---
-def evaluate_pitch(sections):
-    criteria = [
-        "Problem Statement", "Offered Solution", "Market Size", "Founder Background", "Business Model",
-        "Stage of the business", "Revenue Model", "Tech Integration", "Traction", "Team Dynamics",
-        "Team Size", "Cap Table", "Competitive Landscape", "Additional Investment Requirement",
-        "Valuation", "Regulatory Impact", "Exit Opportunity"
+def run_web_search(query):
+    try:
+        search = TavilySearchAPIWrapper()
+        results = search.results(query=query, max_results=3)
+        combined = "\n\n".join(f"{r['title']}:\n{clean_text(r['content'][:800])}" for r in results if r.get("content"))
+        return combined
+    except Exception as e:
+        return f"Search failed: {e}"
+
+def evaluate_pitch_stage1(sections):
+    scoring_table = [
+        ("Problem Statement", 0.08),
+        ("Offered Solution", 0.05),
+        ("Market Size", 0.03),
+        ("Founder Background", 0.08),
+        ("Business Model", 0.08),
+        ("Stage of the business", 0.05),
+        ("Revenue Model", 0.05),
+        ("Tech Integration", 0.08),
+        ("Traction", 0.05),
+        ("Team Dynamics", 0.08),
+        ("Team Size", 0.03),
+        ("Cap Table", 0.10),
+        ("Competitive Landscape", 0.08),
+        ("Additional Investment Requirement", 0.08),
+        ("Valuation", 0.05),
+        ("Regulatory Impact", 0.03),
+        ("Exit Opportunity", 0.03),
     ]
 
-    extracted_sections = {crit: match_section(crit, sections) for crit in criteria}
+    prompt = """You are a VC analyst. Score the startup on the following parameters from 1-5 and return ONLY a markdown table in the format:
 
-    try:
-        tavily = TavilySearchAPIWrapper()
-        mq = f"{extracted_sections['Problem Statement'][:50]} market size India"
-        cq = f"{extracted_sections['Problem Statement'][:50]} competitors India"
-
-        market_results = tavily.results(query=mq, max_results=2)
-        comp_results = tavily.results(query=cq, max_results=2)
-
-        if market_results:
-            extracted_sections["Market Size"] += "\n\n[Web Insight]:\n" + "\n".join(r['content'][:300] for r in market_results if r.get("content"))
-        if comp_results:
-            extracted_sections["Competitive Landscape"] += "\n\n[Web Insight]:\n" + "\n".join(r['content'][:300] for r in comp_results if r.get("content"))
-    except Exception as e:
-        extracted_sections["Market Size"] += f"\n\n(Web search failed: {str(e)})"
-        extracted_sections["Competitive Landscape"] += f"\n\n(Web search failed: {str(e)})"
-
-    prompt = (
-        "You are a venture capital analyst. Based on the pitch content and market info below, "
-        "evaluate each criterion fairly using this format:\n\n"
-        "**Parameter | Score (/5) | Weight | Remarks | Suggested Docs (if score < 3)**\n\n"
-    )
-
-    for crit in criteria:
-        prompt += f"\n## {crit}\n{extracted_sections[crit]}\n"
-
-    prompt += """
-Please return:
-1. The full markdown table in the specified format.
-2. ✅ Final Weighted Score out of 5.
-3. Verdict:
-   - ✅ *Consider for Investment* if score ≥ 3.0
-   - ⚠️ *Second Opinion* if score between 2.25 – 3.0
-   - ❌ *Pass* if score < 2.25
-4. Bullet list of follow-up documents if score ≥ 2.25.
+| Parameter | Score (/5) | Web Insights | Notes |
+|-----------|------------|--------------|-------|
 """
 
-    return ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key).invoke(prompt).content.strip()
+    for label, weight in scoring_table:
+        section = match_section(label, sections)
+        web_data = run_web_search(f"{label} risks or insights for this startup")
+        prompt += f"\n## {label}\nPitch Deck:\n{section}\n\nWeb Insights:\n{web_data}\n"
 
-# --- Streamlit UI ---
-st.set_page_config(page_title="Manna VC Evaluator", page_icon="🤖")
-st.markdown("<h1 style='margin-bottom:20px;'>🤖 Manna: Startup Pitch Evaluator</h1>", unsafe_allow_html=True)
+    prompt += "\nReturn scores out of 5 only. Be strict but fair. Add 1-2 line remark for each.\n"
 
-if not st.session_state.logged_in:
-    st.warning("🔒 Please log in to access this tool.")
-    st.stop()
+    result = ChatOpenAI(model="gpt-4", openai_api_key=openai_api_key).invoke(prompt).content.strip()
+    return result
 
-file = st.file_uploader("📄 Upload your Pitch Deck PDF", type=["pdf"])
+# Main UI
+st.set_page_config(page_title="Manna: VC Pitch Evaluator", page_icon="📊")
+st.title("📊 Manna – VC Pitch Evaluator")
+
+st.markdown("""
+<style>
+.chat-container {
+    display: flex;
+    flex-direction: column;
+}
+.chat-bubble {
+    max-width: 80%;
+    padding: 12px 16px;
+    margin: 6px 0;
+    border-radius: 18px;
+    font-size: 15px;
+    line-height: 1.4;
+    word-wrap: break-word;
+    box-shadow: 0 0 6px rgba(0,0,0,0.3);
+}
+.user-msg {
+    align-self: flex-start;
+    background-color: #1f1f1f;
+    color: white;
+    border-top-left-radius: 2px;
+}
+.bot-msg {
+    align-self: flex-end;
+    background-color: #3a3a5a;
+    color: white;
+    border-top-right-radius: 2px;
+}
+.label {
+    font-size: 13px;
+    color: #999;
+    margin-bottom: 3px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+file = st.file_uploader("📄 Upload Pitch Deck (PDF)", type=["pdf"])
 
 if file:
     file_bytes = file.read()
@@ -134,41 +147,32 @@ if file:
     st.session_state.parsed_doc = text
     st.session_state.sections = split_into_sections(text)
     st.session_state.file_uploaded = True
-    st.success("✅ PDF parsed successfully!")
+    st.success("✅ Pitch deck uploaded and parsed.")
 
-user_input = st.chat_input("💬 Ask your evaluation question…")
+user_input = st.chat_input("💬 Ask Manna your query...")
+
+def save_history():
+    with open("chat_history.json", "w") as f:
+        json.dump(st.session_state.chat_history, f, indent=2)
 
 if user_input:
-    if not st.session_state.file_uploaded:
-        answer = "📄 Please upload a PDF before asking for evaluation."
-    elif any(q in user_input.lower() for q in ["evaluate pitch", "run stage 1", "scorecard", "vc evaluation", "stage 1"]):
-        answer = evaluate_pitch(st.session_state.sections)
-    else:
-        answer = "🤔 I can evaluate pitch decks using Stage 1. Try: 'run stage 1' or 'evaluate pitch'."
+    with st.spinner("🧠 Thinking..."):
+        if user_input.lower() in ["evaluate this pitch", "score pitch"]:
+            answer = evaluate_pitch_stage1(st.session_state.sections)
+        else:
+            prompt = f"Context:\n{st.session_state.parsed_doc}\n\nUser Query:\n{user_input}"
+            answer = ChatOpenAI(model="gpt-4", openai_api_key=openai_api_key).invoke(prompt).content.strip()
 
-    st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-    save_history()
+        st.session_state.chat_history.append((user_input, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        save_history()
 
+# Chat history display
+for user, bot, ts in st.session_state.chat_history:
     st.markdown(f"""
-    <div class='chat-container'>
-        <div class='label'>You:</div>
-        <div class='chat-bubble user-msg'>{user_input}</div>
-        <div class='label' style='text-align:right;'>Manna:</div>
-        <div class='chat-bubble bot-msg'>{answer}</div>
+    <div class="chat-container">
+        <div class="label">You:</div>
+        <div class="chat-bubble user-msg">{user}</div>
+        <div class="label" style="text-align:right;">Manna:</div>
+        <div class="chat-bubble bot-msg">{bot}</div>
     </div>
     """, unsafe_allow_html=True)
-
-# --- Styling ---
-st.markdown("""
-<style>
-.chat-container { display: flex; flex-direction: column; }
-.chat-bubble {
-    max-width: 80%; padding: 12px 16px; margin: 6px 0;
-    border-radius: 18px; font-size: 15px; line-height: 1.4;
-    word-wrap: break-word; box-shadow: 0 0 6px rgba(0,0,0,0.3);
-}
-.user-msg { align-self: flex-start; background-color: #1f1f1f; color: white; border-top-left-radius: 2px; }
-.bot-msg { align-self: flex-end; background-color: #3a3a5a; color: white; border-top-right-radius: 2px; }
-.label { font-size: 13px; color: #999; margin-bottom: 3px; }
-</style>
-""", unsafe_allow_html=True)
