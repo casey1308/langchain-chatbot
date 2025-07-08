@@ -20,17 +20,22 @@ if not openai_api_key or not tavily_api_key:
     st.error("❌ Please set both OPENAI_API_KEY and TAVILY_API_KEY in your .env file.")
     st.stop()
 
-# Init session state
-for key in ["chat_history", "parsed_doc", "file_uploaded", "sections"]:
+# --- Session State Init ---
+for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "logged_in"]:
     if key not in st.session_state:
-        st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
+        if key == "chat_history":
+            st.session_state[key] = []
+        elif key == "logged_in":
+            st.session_state[key] = True  # Set to False if you’re actually implementing login
+        else:
+            st.session_state[key] = None if key == "sections" else False
 
 # Save chat history
 def save_history():
     with open("chat_history.json", "w") as f:
         json.dump(st.session_state.chat_history, f, indent=2)
 
-# --- Utility functions ---
+# --- Utility Functions ---
 def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     return re.sub(r"\n{2,}", "\n", text).strip()
@@ -64,36 +69,24 @@ def match_section(key, sections):
                 return sections[k]
     return "Not mentioned"
 
-# 🔥 Dynamic Stage 1 Evaluation with Web Search
+# --- Stage 1 Evaluation with Web Insights ---
 def evaluate_pitch(sections):
     criteria = [
-        "Problem Statement",
-        "Offered Solution",
-        "Market Size",
-        "Founder Background",
-        "Business Model",
-        "Stage of the business",
-        "Revenue Model",
-        "Tech Integration",
-        "Traction",
-        "Team Dynamics",
-        "Team Size",
-        "Cap Table",
-        "Competitive Landscape",
-        "Additional Investment Requirement",
-        "Valuation",
-        "Regulatory Impact",
-        "Exit Opportunity"
+        "Problem Statement", "Offered Solution", "Market Size", "Founder Background", "Business Model",
+        "Stage of the business", "Revenue Model", "Tech Integration", "Traction", "Team Dynamics",
+        "Team Size", "Cap Table", "Competitive Landscape", "Additional Investment Requirement",
+        "Valuation", "Regulatory Impact", "Exit Opportunity"
     ]
 
     extracted_sections = {crit: match_section(crit, sections) for crit in criteria}
 
     try:
         tavily = TavilySearchAPIWrapper()
-        market_query = f"{extracted_sections['Problem Statement'][:50]} market size India"
-        comp_query = f"{extracted_sections['Problem Statement'][:50]} competitors India"
-        market_results = tavily.results(query=market_query, max_results=2)
-        comp_results = tavily.results(query=comp_query, max_results=2)
+        mq = f"{extracted_sections['Problem Statement'][:50]} market size India"
+        cq = f"{extracted_sections['Problem Statement'][:50]} competitors India"
+
+        market_results = tavily.results(query=mq, max_results=2)
+        comp_results = tavily.results(query=cq, max_results=2)
 
         if market_results:
             extracted_sections["Market Size"] += "\n\n[Web Insight]:\n" + "\n".join(r['content'][:300] for r in market_results if r.get("content"))
@@ -125,10 +118,14 @@ Please return:
 
     return ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key).invoke(prompt).content.strip()
 
-
 # --- Streamlit UI ---
 st.set_page_config(page_title="Manna VC Evaluator", page_icon="🤖")
-st.title("🤖 Manna: Startup Pitch Evaluator")
+st.markdown("<h1 style='margin-bottom:20px;'>🤖 Manna: Startup Pitch Evaluator</h1>", unsafe_allow_html=True)
+
+if not st.session_state.logged_in:
+    st.warning("🔒 Please log in to access this tool.")
+    st.stop()
+
 file = st.file_uploader("📄 Upload your Pitch Deck PDF", type=["pdf"])
 
 if file:
