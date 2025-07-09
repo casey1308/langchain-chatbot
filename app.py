@@ -348,69 +348,64 @@ def format_crm_data_for_zoho(crm_data):
     return formatted_data
 
 def send_to_zoho_webhook(crm_data):
-    """Enhanced Zoho webhook integration with better error handling"""
     if not zoho_webhook_url:
         st.error("❌ ZOHO_WEBHOOK_URL not configured in .env file")
         return False
-    
+
     try:
-        # Format data for Zoho CRM
+        # Remove the "data": [ ... ] wrapper
         zoho_payload = {
-            "data": [{
-                "Company": crm_data.get("company_name", ""),
-                "Industry": crm_data.get("sector", ""),
-                "Stage": crm_data.get("stage", ""),
-                "Description": crm_data.get("description", ""),
-                "Lead_Source": crm_data.get("source", "Pitch Deck Upload"),
-                "Owner": crm_data.get("assign", ""),
-                
-                # Financial fields (as numbers for Zoho)
-                "Funding_Ask": crm_data.get("ask_amount") or 0,
-                "Current_Revenue": crm_data.get("revenue_amount") or 0,
-                "Valuation": crm_data.get("valuation_amount") or 0,
-                
-                # Display versions for notes
-                "Ask_Display": crm_data.get("ask_display", ""),
-                "Revenue_Display": crm_data.get("revenue_display", ""),
-                "Valuation_Display": crm_data.get("valuation_display", ""),
-                
-                # Additional metadata
-                "Upload_Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "Document_Type": "Pitch Deck",
-                "Processing_Status": "Completed"
-            }]
+            "Company": crm_data.get("company_name", ""),
+            "Industry": crm_data.get("sector", ""),
+            "Stage": crm_data.get("stage", ""),
+            "Description": crm_data.get("description", ""),
+            "Lead_Source": crm_data.get("source", "Pitch Deck Upload"),
+            "Owner": crm_data.get("assign", ""),
+            "Funding_Ask": crm_data.get("ask_amount") or 0,
+            "Current_Revenue": crm_data.get("revenue_amount") or 0,
+            "Valuation": crm_data.get("valuation_amount") or 0,
+            "Ask_Display": crm_data.get("ask_display", ""),
+            "Revenue_Display": crm_data.get("revenue_display", ""),
+            "Valuation_Display": crm_data.get("valuation_display", ""),
+            "Upload_Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Document_Type": "Pitch Deck",
+            "Processing_Status": "Completed"
         }
-        
+
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
-        
+
         logger.info(f"Sending to Zoho Flow: {json.dumps(zoho_payload, indent=2)}")
-        
-        # Send with timeout
         response = requests.post(
-            zoho_webhook_url, 
-            json=zoho_payload, 
+            zoho_webhook_url,
+            json=zoho_payload,
             headers=headers,
             timeout=30
         )
-        
+
+        logger.info(f"Zoho response: {response.status_code} {response.text}")
+
         if response.status_code == 200:
             logger.info("✅ Successfully sent to Zoho Flow")
             return True
         else:
             logger.error(f"❌ Zoho webhook failed: {response.status_code} - {response.text}")
+            st.error(f"❌ Zoho webhook failed: {response.status_code} - {response.text}")
             return False
-            
+
     except requests.exceptions.Timeout:
         logger.error("❌ Zoho webhook timeout")
+        st.error("❌ Zoho webhook timeout")
         return False
     except requests.exceptions.ConnectionError:
         logger.error("❌ Zoho webhook connection error")
+        st.error("❌ Zoho webhook connection error")
         return False
     except Exception as e:
         logger.error(f"❌ Zoho webhook error: {str(e)}")
+        st.error(f"❌ Zoho webhook error: {str(e)}")
         return False
 
 def display_zoho_status(webhook_success, crm_data):
