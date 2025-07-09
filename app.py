@@ -617,13 +617,14 @@ if file:
         crm_structured_text = extract_crm_structured_data(text)
         st.session_state.structured_data = crm_structured_text
         st.session_state.crm_data = parse_crm_data(crm_structured_text)
-        
+
         # ✅ Add received_date (upload date)
-       st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-        
+        st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
+
         send_to_zoho_webhook(st.session_state.crm_data)
-    
+
     st.success("✅ Pitch deck parsed and CRM data extracted!")
+
 
     
     # Show CRM data preview
