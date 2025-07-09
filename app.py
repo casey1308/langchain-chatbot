@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 serpapi_key = os.getenv("SERPAPI_API_KEY")
+zoho_webhook_url = os.getenv("ZOHO_WEBHOOK_URL")
 
 if not openai_api_key or not serpapi_key:
     st.error("❌ Add your OPENAI_API_KEY and SERPAPI_API_KEY in .env")
