@@ -1,61 +1,4 @@
-# Google SERP API fallback
-def search_serpapi(query):
-    try:
-        params = {
-            "engine": "google",
-            "q": query,
-            "api_key": serpapi_key,
-            "num": 5  # Increased from 3 to get more results
-        }
-        r = requests.get("https://serpapi.com/search", params=params)
-        if r.status_code == 200:
-            data = r.json()
-            if "organic_results" not in data:
-                return "No search results found."
-            
-            combined = ""
-            for res in data["organic_results"]:
-                title = res.get("title", "")
-                snippet = res.get("snippet", "")
-                link = res.get("link", "")
-                combined += f"Title: {title}\nSnippet: {snippet}\nSource: {link}\n\n"
-            
-            # Also check for people_also_ask results for founder queries
-            if "people_also_ask" in data:
-                combined += "\n--- Related Questions ---\n"
-                for paa in data["people_also_ask"][:3]:  # Top 3 related questions
-                    combined += f"Q: {paa.get('question', '')}\nA: {paa.get('snippet', '')}\n\n"
-            
-            # Check for knowledge graph results (good for person info)
-            if "knowledge_graph" in data:
-                kg = data["knowledge_graph"]
-                combined += "\n--- Knowledge Graph ---\n"
-                if "title" in kg:
-                    combined += f"Title: {kg['title']}\n"
-                if "description" in kg:
-                    combined += f"Description: {kg['description']}\n"
-                if "attributes" in kg:
-                    for attr_name, attr_value in kg["attributes"].items():
-                        combined += f"{attr_name}: {attr_value}\n"
-                combined += "\n"
-            
-            llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-            
-            # Enhanced prompt for founder/background searches
-            if any(x in query.lower() for x in ["founder", "background", "education", "experience", "linkedin", "profile"]):
-                search_prompt = f"""Analyze these search results and provide a comprehensive summary focusing on:
-                1. Educational background (universities, degrees, graduation years)
-                2. Professional experience (previous companies, roles, duration)
-                3. Notable achievements or recognition
-                4. LinkedIn profile information if available
-                5. Any relevant industry expertise
-                6. Entrepreneurial history
-                
-                Be specific about dates, companies, and roles. If information is limited, mention what's available.
-                
-                Search results:\n{combined}"""
-            else:
-                search_prompt = f"Summarize these search results forimport streamlit as st
+import streamlit as st
 import os
 import re
 import requests
@@ -65,6 +8,7 @@ from datetime import datetime
 from difflib import get_close_matches
 import PyPDF2
 import logging
+import json
 from openai import OpenAIError, RateLimitError, APIError
 
 from langchain_openai import ChatOpenAI
@@ -84,9 +28,16 @@ if not openai_api_key or not serpapi_key:
     st.stop()
 
 # Initialize session state
-for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "structured_data"]:
+for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "structured_data", "selected_chat_index"]:
     if key not in st.session_state:
-        st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
+        if key == "chat_history":
+            st.session_state[key] = []
+        elif key == "file_uploaded":
+            st.session_state[key] = False
+        elif key == "selected_chat_index":
+            st.session_state[key] = None
+        else:
+            st.session_state[key] = None
 
 # Enhanced text cleaner
 def clean_text(text):
@@ -160,62 +111,55 @@ def extract_structured_data(text):
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
         
         extraction_prompt = """
-        Analyze this pitch deck text and extract the following information in JSON format.
+        Analyze this pitch deck text and extract the following information in a readable format.
         Look through ALL the text carefully and extract ANY information that might be relevant.
         Don't just look for obvious sections - information might be scattered throughout.
         
-        {
-            "founders": [
-                {
-                    "name": "Full Name or Not mentioned",
-                    "role": "CEO/CTO/etc or Not mentioned",
-                    "background": "Brief background or Not mentioned",
-                    "experience": "Relevant experience or Not mentioned",
-                    "linkedin": "LinkedIn profile if mentioned or Not mentioned"
-                }
-            ],
-            "company": {
-                "name": "Company Name or Not mentioned",
-                "description": "Brief description",
-                "industry": "Industry/Sector",
-                "stage": "Seed/Series A/etc or Not mentioned",
-                "location": "Location if mentioned or Not mentioned"
-            },
-            "funding": {
-                "ask_amount": "Amount seeking or Not mentioned",
-                "valuation": "Current valuation or Not mentioned",
-                "use_of_funds": "How funds will be used or Not mentioned",
-                "previous_rounds": "Previous funding info or Not mentioned"
-            },
-            "market": {
-                "size": "Market size with specific numbers",
-                "problem": "Problem being solved",
-                "solution": "Solution provided",
-                "target_market": "Target market description"
-            },
-            "traction": {
-                "revenue": "Current revenue or Not mentioned",
-                "customers": "Customer count/info",
-                "growth": "Growth metrics",
-                "partnerships": "Key partnerships or Not mentioned",
-                "downloads": "App downloads if mentioned",
-                "users": "Active users if mentioned"
-            },
-            "product": {
-                "description": "Product/service description",
-                "features": "Key features",
-                "technology": "Technology stack if mentioned",
-                "differentiators": "What makes it unique"
-            },
-            "business_model": {
-                "revenue_model": "How they make money",
-                "pricing": "Pricing strategy if mentioned",
-                "unit_economics": "Unit economics if mentioned"
-            },
-            "team_size": "Team size if mentioned or Not mentioned",
-            "timeline": "Key milestones or timeline if mentioned",
-            "competition": "Competitive landscape info if mentioned"
-        }
+        Please provide a structured analysis in the following format:
+        
+        COMPANY OVERVIEW:
+        • Company Name: [Name or Not mentioned]
+        • Description: [Brief description]
+        • Industry: [Industry/Sector]
+        • Stage: [Seed/Series A/etc or Not mentioned]
+        • Location: [Location if mentioned or Not mentioned]
+        
+        FOUNDERS & TEAM:
+        • Founder 1: [Name] - [Role] - [Background/Experience]
+        • Founder 2: [Name] - [Role] - [Background/Experience]
+        • Team Size: [Number if mentioned or Not mentioned]
+        
+        MARKET & PROBLEM:
+        • Market Size: [Size with specific numbers]
+        • Problem: [Problem being solved]
+        • Solution: [Solution provided]
+        • Target Market: [Target market description]
+        
+        PRODUCT & TECHNOLOGY:
+        • Product Description: [Product/service description]
+        • Key Features: [Key features]
+        • Technology Stack: [Technology if mentioned]
+        • Differentiators: [What makes it unique]
+        
+        TRACTION & METRICS:
+        • Revenue: [Current revenue or Not mentioned]
+        • Customers: [Customer count/info]
+        • Growth: [Growth metrics]
+        • Users: [Active users if mentioned]
+        • Partnerships: [Key partnerships or Not mentioned]
+        
+        FUNDING & FINANCIALS:
+        • Funding Ask: [Amount seeking or Not mentioned]
+        • Valuation: [Current valuation or Not mentioned]
+        • Use of Funds: [How funds will be used or Not mentioned]
+        • Previous Rounds: [Previous funding info or Not mentioned]
+        • Revenue Model: [How they make money]
+        • Pricing: [Pricing strategy if mentioned]
+        
+        COMPETITION & STRATEGY:
+        • Competition: [Competitive landscape info if mentioned]
+        • Go-to-Market: [Marketing/sales strategy]
+        • Timeline: [Key milestones or timeline if mentioned]
         
         IMPORTANT: Look for information in ALL parts of the text, not just obvious sections. 
         Extract specific numbers, percentages, and concrete details whenever possible.
@@ -225,8 +169,8 @@ def extract_structured_data(text):
         """
         
         messages = [
-            SystemMessage(content="You are an expert at extracting structured data from pitch decks. Be thorough and look for information throughout the entire document, not just in obvious sections. Extract specific numbers and details whenever possible."),
-            HumanMessage(content=f"{extraction_prompt}\n\n{text[:6000]}")  # Increased limit for more context
+            SystemMessage(content="You are an expert at extracting structured data from pitch decks. Be thorough and look for information throughout the entire document, not just in obvious sections. Extract specific numbers and details whenever possible. Format the output in a clear, readable way with bullet points and sections."),
+            HumanMessage(content=f"{extraction_prompt}\n\n{text[:6000]}")
         ]
         
         response = llm.invoke(messages)
@@ -295,18 +239,40 @@ def search_serpapi(query):
             "engine": "google",
             "q": query,
             "api_key": serpapi_key,
-            "num": 3
+            "num": 5  # Increased from 3 to get more results
         }
         r = requests.get("https://serpapi.com/search", params=params)
         if r.status_code == 200:
             data = r.json()
             if "organic_results" not in data:
                 return "No search results found."
+            
             combined = ""
             for res in data["organic_results"]:
                 title = res.get("title", "")
                 snippet = res.get("snippet", "")
-                combined += f"{title}\n{snippet}\n\n"
+                link = res.get("link", "")
+                combined += f"Title: {title}\nSnippet: {snippet}\nSource: {link}\n\n"
+            
+            # Also check for people_also_ask results for founder queries
+            if "people_also_ask" in data:
+                combined += "\n--- Related Questions ---\n"
+                for paa in data["people_also_ask"][:3]:  # Top 3 related questions
+                    combined += f"Q: {paa.get('question', '')}\nA: {paa.get('snippet', '')}\n\n"
+            
+            # Check for knowledge graph results (good for person info)
+            if "knowledge_graph" in data:
+                kg = data["knowledge_graph"]
+                combined += "\n--- Knowledge Graph ---\n"
+                if "title" in kg:
+                    combined += f"Title: {kg['title']}\n"
+                if "description" in kg:
+                    combined += f"Description: {kg['description']}\n"
+                if "attributes" in kg:
+                    for attr_name, attr_value in kg["attributes"].items():
+                        combined += f"{attr_name}: {attr_value}\n"
+                combined += "\n"
+            
             llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
             
             # Enhanced prompt for founder/background searches
@@ -348,11 +314,15 @@ with st.sidebar:
         st.write(f"Total sections: {len(st.session_state.sections)}")
         st.write(f"Total text length: {len(st.session_state.parsed_doc)} chars")
     
-    # Show structured data
+    # Show structured data with expandable view
     if st.session_state.structured_data:
         st.header("🔍 Extracted Data")
-        with st.expander("View Structured Data"):
-            st.text_area("Structured Analysis", st.session_state.structured_data, height=300, key="structured_data_sidebar")
+        with st.expander("View Structured Data", expanded=False):
+            st.markdown(st.session_state.structured_data)
+        
+        # Button to view full structured data
+        if st.button("📄 View Full Structured Analysis"):
+            st.session_state.show_structured_data = True
     
     # Chat History in Sidebar
     if st.session_state.chat_history:
@@ -361,17 +331,44 @@ with st.sidebar:
         # Add clear chat button
         if st.button("🗑️ Clear Chat History"):
             st.session_state.chat_history = []
+            st.session_state.selected_chat_index = None
             st.rerun()
         
         # Display chat history in reverse order (newest first)
         for i, (user, bot, timestamp) in enumerate(reversed(st.session_state.chat_history)):
-            with st.expander(f"Q{len(st.session_state.chat_history)-i}: {user[:30]}..."):
-                st.markdown(f"**🧑 You:** {user}")
-                st.markdown(f"**🤖 Manna:**")
-                st.markdown(bot)
-                st.markdown(f"*{timestamp}*")
+            chat_index = len(st.session_state.chat_history) - 1 - i
+            if st.button(f"Q{chat_index + 1}: {user[:30]}...", key=f"chat_{chat_index}"):
+                st.session_state.selected_chat_index = chat_index
+                st.rerun()
 
 # Main content area
+
+# Show full structured data if requested
+if hasattr(st.session_state, 'show_structured_data') and st.session_state.show_structured_data:
+    st.header("🔍 Complete Structured Analysis")
+    st.markdown(st.session_state.structured_data)
+    if st.button("❌ Close"):
+        st.session_state.show_structured_data = False
+        st.rerun()
+    st.markdown("---")
+
+# Show selected chat from history
+if st.session_state.selected_chat_index is not None:
+    chat_data = st.session_state.chat_history[st.session_state.selected_chat_index]
+    user_q, bot_response, timestamp = chat_data
+    
+    st.header(f"💬 Chat #{st.session_state.selected_chat_index + 1}")
+    st.markdown(f"**🧑 You:** {user_q}")
+    st.markdown(f"**🤖 Manna:**")
+    st.markdown(bot_response)
+    st.markdown(f"*{timestamp}*")
+    
+    if st.button("❌ Close Chat View"):
+        st.session_state.selected_chat_index = None
+        st.rerun()
+    
+    st.markdown("---")
+
 # Upload
 file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
 
@@ -406,6 +403,9 @@ st.markdown("- `What are the funding details?`")
 user_query = st.chat_input("💬 Ask about founders, funding, valuation, team, etc.")
 
 if user_query:
+    # Clear any selected chat when asking new question
+    st.session_state.selected_chat_index = None
+    
     with st.spinner("🤖 Thinking..."):
         try:
             context = st.session_state.parsed_doc or ""
@@ -462,14 +462,16 @@ if user_query:
                     founder_names = []
                     if st.session_state.structured_data:
                         try:
-                            import json
-                            structured_json = json.loads(st.session_state.structured_data)
-                            if "founders" in structured_json:
-                                for founder in structured_json["founders"]:
-                                    if founder.get("name") and founder["name"] != "Not mentioned":
-                                        founder_names.append(founder["name"])
+                            # Try to extract names from the structured text
+                            lines = st.session_state.structured_data.split('\n')
+                            for line in lines:
+                                if 'Founder' in line and ':' in line:
+                                    # Extract name from format like "• Founder 1: John Doe - CEO - Background"
+                                    parts = line.split(':')[1].split('-')
+                                    if parts[0].strip() and parts[0].strip() != "Not mentioned":
+                                        founder_names.append(parts[0].strip())
                         except:
-                            # If JSON parsing fails, try to extract names from text
+                            # If extraction fails, try to find common names
                             if "Himanshu Gupta" in st.session_state.structured_data:
                                 founder_names.append("Himanshu Gupta")
                     
@@ -511,23 +513,34 @@ if user_query:
                 HumanMessage(content=f"{context_msg}\n\nVC Question: {user_query}")
             ]
 
-            # Chat output
+            # Display the conversation
             st.markdown(f"**🧑 You:** {user_query}")
             st.markdown("**🤖 Manna:**")
 
-            def generate_response():
-                for chunk in llm.stream(messages):
-                    if hasattr(chunk, 'content') and chunk.content:
-                        yield chunk.content
+            # Create a placeholder for the streaming response
+            response_placeholder = st.empty()
+            full_response = ""
 
-            full_output = st.write_stream(generate_response())
+            # Stream the response
+            for chunk in llm.stream(messages):
+                if hasattr(chunk, 'content') and chunk.content:
+                    full_response += chunk.content
+                    response_placeholder.markdown(full_response + "▌")
+            
+            # Remove the cursor and show final response
+            response_placeholder.markdown(full_response)
+            
+            # Store in chat history
+            st.session_state.chat_history.append(
+                (user_query, full_response.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            )
 
         except RateLimitError:
             st.error("❌ Rate limit exceeded. Please try again in a minute.")
-            full_output = "Rate limit exceeded."
+            full_response = "Rate limit exceeded."
         except APIError as e:
             st.error(f"❌ OpenAI API error: {str(e)}")
-            full_output = f"API error: {str(e)}"
+            full_response = f"API error: {str(e)}"
         except Exception as e:
             st.error(f"❌ Unexpected error: {str(e)}")
             logger.error(f"Streaming error: {str(e)}", exc_info=True)
@@ -535,15 +548,13 @@ if user_query:
             # Fallback to non-streaming
             try:
                 response = llm.invoke(messages)
-                full_output = response.content
-                st.markdown(full_output)
+                full_response = response.content
+                st.markdown(full_response)
+                
+                # Store in chat history
+                st.session_state.chat_history.append(
+                    (user_query, full_response.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                )
             except Exception as fallback_e:
                 st.error(f"❌ Fallback also failed: {str(fallback_e)}")
-                full_output = "Error generating response."
-
-        st.session_state.chat_history.append(
-            (user_query, full_output.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        )
-        
-        # Rerun to update sidebar
-        st.rerun()
+                full_response = "Error generating response."
