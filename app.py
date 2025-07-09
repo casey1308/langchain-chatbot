@@ -49,7 +49,7 @@ if not validate_environment():
     st.stop()
 
 # Initialize session state
-for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "structured_data", "selected_chat_index", "crm_data"]:
+for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "structured_data", "selected_chat_index", "crm_data", "show_comprehensive_analysis", "show_crm_summary", "selected_section"]:
     if key not in st.session_state:
         if key == "chat_history":
             st.session_state[key] = []
@@ -57,6 +57,8 @@ for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "structur
             st.session_state[key] = False
         elif key == "selected_chat_index":
             st.session_state[key] = None
+        elif key in ["show_comprehensive_analysis", "show_crm_summary"]:
+            st.session_state[key] = False
         else:
             st.session_state[key] = None
 
@@ -113,7 +115,6 @@ def parse_currency_amount(text):
     text = text.strip()
     
     # Pattern to match currency amounts
-    # Matches: $1M, $1.5M, $2 million, 1.5 million, $500K, $5,000,000, etc.
     patterns = [
         r'[\$₹€£¥]?\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*([kmb]|million|billion|thousand|crore|lakh)',
         r'[\$₹€£¥]?\s*(\d+(?:,\d{3})*(?:\.\d+)?)\s*([kmb])',
@@ -160,6 +161,37 @@ def format_currency_display(amount, original_text=""):
         return f"${amount/1000:.0f}K"
     else:
         return f"${amount:,.0f}"
+
+def validate_crm_data(crm_data):
+    """Validate extracted CRM data"""
+    validation_result = {"valid": True, "errors": [], "warnings": []}
+    
+    # Check for required fields
+    required_fields = ["company_name"]
+    for field in required_fields:
+        if not crm_data.get(field) or crm_data[field].strip() == "":
+            validation_result["valid"] = False
+            validation_result["errors"].append(f"Missing required field: {field}")
+    
+    # Check for HTML content (indicates extraction issues)
+    for field, value in crm_data.items():
+        if value and isinstance(value, str):
+            if '<' in value and '>' in value:
+                validation_result["warnings"].append(f"HTML content detected in {field}")
+            if 'div' in value.lower() or 'html' in value.lower():
+                validation_result["warnings"].append(f"HTML tags detected in {field}")
+    
+    # Check financial fields
+    financial_fields = ['ask_amount', 'revenue_amount', 'valuation_amount']
+    for field in financial_fields:
+        if field in crm_data and crm_data[field] is not None:
+            try:
+                float(crm_data[field])
+            except (ValueError, TypeError):
+                validation_result["warnings"].append(f"Invalid financial value in {field}")
+    
+    return validation_result
+
 def extract_crm_structured_data(text):
     """Enhanced CRM data extraction with better HTML handling"""
     try:
@@ -215,9 +247,13 @@ def extract_crm_structured_data(text):
         if '<div' in clean_response or '<html' in clean_response:
             logger.warning("LLM returned HTML content, attempting to clean...")
             # Extract text from HTML if present
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(clean_response, 'html.parser')
-            clean_response = soup.get_text()
+            try:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(clean_response, 'html.parser')
+                clean_response = soup.get_text()
+            except ImportError:
+                # If BeautifulSoup is not available, use regex to clean
+                clean_response = re.sub(r'<[^>]*>', '', clean_response)
         
         return clean_response
         
@@ -232,6 +268,7 @@ valuation: Not mentioned
 source: Pitch Deck Upload
 assign: Not mentioned
 description: Not mentioned"""
+
 def parse_crm_data(structured_text):
     """Enhanced CRM data parser with better validation"""
     crm_data = {}
@@ -278,68 +315,6 @@ def parse_crm_data(structured_text):
             crm_data[f"{field}_amount"] = None
     
     return crm_data
-
-
-# Updated file processing section
-uploaded_file = st.file_uploader("Upload your pitch deck (PDF)", type=["pdf"])
-
-if uploaded_file:
-    with st.spinner("🔄 Processing pitch deck..."):
-        file_bytes = uploaded_file.read()
-        text = extract_pdf_text(file_bytes)
-        st.session_state.parsed_doc = text
-        st.session_state.sections = split_sections(text)
-        st.session_state.file_uploaded = True
-
-        with st.spinner("🧠 Extracting CRM data with AI..."):
-            crm_structured_text = extract_crm_structured_data(text)
-            st.session_state.structured_data = crm_structured_text
-            st.session_state.crm_data = parse_crm_data(crm_structured_text)
-            
-            # Validate the extracted data
-            validation = validate_crm_data(st.session_state.crm_data)
-            
-            if not validation["valid"]:
-                st.error("⚠️ Data extraction issues detected:")
-                for error in validation["errors"]:
-                    st.error(f"- {error}")
-                with st.expander("🔍 Debug: Raw Extraction"):
-                    st.code(crm_structured_text)
-                st.warning("Retrying with simplified extraction...")
-                retry_prompt = f"""
-                Extract key information from this pitch deck in simple format:
-
-                Company: [company name]
-                Industry: [industry/sector]
-                Stage: [funding stage]
-                Funding: [amount requested]
-                Revenue: [current revenue]
-                Value: [valuation]
-                Founders: [founder names]
-
-                Text: {text[:5000]}
-                """
-                try:
-                    llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
-                    retry_response = llm.invoke(retry_prompt)
-                    st.info("Retry extraction:")
-                    st.code(retry_response.content)
-                except Exception as e:
-                    st.error(f"Retry failed: {e}")
-            
-            if validation["warnings"]:
-                for warning in validation["warnings"]:
-                    st.warning(f"⚠️ {warning}")
-        
-        # Only proceed with Zoho if validation passed
-        if validation["valid"]:
-            with st.spinner("🔗 Sending to Zoho CRM..."):
-                formatted_crm_data = format_crm_data_for_zoho(st.session_state.crm_data)
-                webhook_success = send_to_zoho_webhook(formatted_crm_data)
-                display_zoho_status(webhook_success, st.session_state.crm_data)
-        
-        st.success("✅ Pitch deck processed successfully!")
-
 
 def format_crm_data_for_zoho(crm_data):
     """Enhanced CRM data formatting for Zoho with validation"""
@@ -700,392 +675,260 @@ if st.session_state.structured_data:
         if st.button("📊 CRM Data Summary", use_container_width=True):
             st.session_state.show_crm_summary = True
 
-# File upload section
+# SINGLE File upload section
 st.header("📄 Upload Pitch Deck")
-file = st.file_uploader("Drop your PDF pitch deck here", type=["pdf"])
+uploaded_file = st.file_uploader("Drop your PDF pitch deck here", type=["pdf"])
 
-if file:
+if uploaded_file:
     with st.spinner("🔄 Processing pitch deck..."):
-        file_bytes = file.read()
+        file_bytes = uploaded_file.read()
         text = extract_pdf_text(file_bytes)
         st.session_state.parsed_doc = text
         st.session_state.sections = split_sections(text)
         st.session_state.file_uploaded = True
 
-    with st.spinner("🧠 Extracting CRM data with AI..."):
-        crm_structured_text = extract_crm_structured_data(text)
-        st.session_state.structured_data = crm_structured_text
-        st.session_state.crm_data = parse_crm_data(crm_structured_text)
-    
-    # Enhanced Zoho integration with better feedback
-    with st.spinner("🔗 Sending to Zoho CRM..."):
-        formatted_crm_data = format_crm_data_for_zoho(st.session_state.crm_data)
-        webhook_success = send_to_zoho_webhook(formatted_crm_data)
-        
-        # Display integration status
-        display_zoho_status(webhook_success, st.session_state.crm_data)
-    
+        with st.spinner("🧠 Extracting CRM data with AI..."):
+            crm_structured_text = extract_crm_structured_data(text)
+            st.session_state.structured_data = crm_structured_text
+            st.session_state.crm_data = parse_crm_data(crm_structured_text)
+            
+            # Validate the extracted data
+            validation = validate_crm_data(st.session_state.crm_data)
+            
+            if not validation["valid"]:
+                st.error("⚠️ Data extraction issues detected")
+
+d")
+                for error in validation["errors"]:
+                    st.error(f"❌ {error}")
+            
+            if validation["warnings"]:
+                st.warning("⚠️ Data quality warnings:")
+                for warning in validation["warnings"]:
+                    st.warning(f"⚠️ {warning}")
+
+        # Auto-send to Zoho CRM
+        if st.session_state.crm_data and st.session_state.crm_data.get("company_name"):
+            with st.spinner("📤 Sending data to Zoho CRM..."):
+                zoho_success = send_to_zoho_webhook(st.session_state.crm_data)
+                display_zoho_status(zoho_success, st.session_state.crm_data)
+
     st.success("✅ Pitch deck processed successfully!")
-
-    # Enhanced CRM Data Preview Card
-    if st.session_state.crm_data:
-        st.markdown("### 🔗 CRM Integration Data")
-        
-        # Create enhanced preview card with better styling
-        company_name = st.session_state.crm_data.get("company_name", "Unknown Company")
-        sector = st.session_state.crm_data.get("sector", "Not specified")
-        stage = st.session_state.crm_data.get("stage", "Not specified")
-        ask_display = st.session_state.crm_data.get("ask_display", "Not mentioned")
-        revenue_display = st.session_state.crm_data.get("revenue_display", "Not mentioned")
-        valuation_display = st.session_state.crm_data.get("valuation_display", "Not mentioned")
-        assign = st.session_state.crm_data.get("assign", "Not mentioned")
-        description = st.session_state.crm_data.get("description", "No description available")
-        source = st.session_state.crm_data.get("source", "Pitch Deck Upload")
-        
-        card_html = f"""
-        <style>
-        .crm-card {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 20px;
-            padding: 2rem;
-            margin: 1rem 0;
-            color: white;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        }}
-        .crm-card h2 {{
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin: 0 0 1rem 0;
-        text-align: center;
-    }}
-    .crm-field {{
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 0.5rem 0;
-        border-bottom: 1px solid rgba(255,255,255,0.2);
-    }}
-    .crm-field:last-child {{
-        border-bottom: none;
-    }}
-    .crm-label {{
-        font-weight: 600;
-        opacity: 0.9;
-        flex: 1;
-    }}
-    .crm-value {{
-        font-weight: 400;
-        text-align: right;
-        flex: 2;
-        word-wrap: break-word;
-    }}
-    .crm-metrics {{
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1rem;
-        margin-top: 1rem;
-    }}
-    .crm-metric {{
-        background: rgba(255,255,255,0.1);
-        border-radius: 10px;
-        padding: 1rem;
-        text-align: center;
-    }}
-    .crm-metric-value {{
-        font-size: 1.5rem;
-        font-weight: 700;
-        margin-bottom: 0.5rem;
-    }}
-    .crm-metric-label {{
-        font-size: 0.9rem;
-        opacity: 0.8;
-    }}
-</style>
-<div class="crm-card">
-    <h2>🏢 {company_name}</h2>
-    <div class="crm-field">
-        <div class="crm-label">Industry:</div>
-        <div class="crm-value">{sector}</div>
-    </div>
-    <div class="crm-field">
-        <div class="crm-label">Stage:</div>
-        <div class="crm-value">{stage}</div>
-    </div>
-    <div class="crm-field">
-        <div class="crm-label">Founders:</div>
-        <div class="crm-value">{assign}</div>
-    </div>
-    <div class="crm-field">
-        <div class="crm-label">Source:</div>
-        <div class="crm-value">{source}</div>
-    </div>
     
-    <div class="crm-metrics">
-        <div class="crm-metric">
-            <div class="crm-metric-value">{ask_display}</div>
-            <div class="crm-metric-label">Funding Ask</div>
-        </div>
-        <div class="crm-metric">
-            <div class="crm-metric-value">{revenue_display}</div>
-            <div class="crm-metric-label">Revenue</div>
-        </div>
-        <div class="crm-metric">
-            <div class="crm-metric-value">{valuation_display}</div>
-            <div class="crm-metric-label">Valuation</div>
-        </div>
-    </div>
+    # Display extracted sections
+    if st.session_state.sections:
+        st.subheader("📋 Extracted Sections")
+        for section_name, section_content in st.session_state.sections.items():
+            if section_content.strip():
+                with st.expander(f"📁 {section_name}"):
+                    st.write(section_content[:500] + "..." if len(section_content) > 500 else section_content)
+
+# CRM Data Summary Display
+if st.session_state.show_crm_summary and st.session_state.crm_data:
+    st.header("📊 CRM Data Summary")
     
-    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.2);">
-        <strong>Description:</strong><br>
-        {description}
-    </div>
-</div>
-"""
+    # Create columns for better layout
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Company", st.session_state.crm_data.get("company_name", "Not mentioned"))
+        st.metric("Sector", st.session_state.crm_data.get("sector", "Not mentioned"))
+        st.metric("Stage", st.session_state.crm_data.get("stage", "Not mentioned"))
+    
+    with col2:
+        ask_amount = st.session_state.crm_data.get("ask_amount")
+        ask_display = format_currency_display(ask_amount, st.session_state.crm_data.get("ask_display", ""))
+        st.metric("Funding Ask", ask_display)
+        
+        revenue_amount = st.session_state.crm_data.get("revenue_amount")
+        revenue_display = format_currency_display(revenue_amount, st.session_state.crm_data.get("revenue_display", ""))
+        st.metric("Revenue", revenue_display)
+    
+    with col3:
+        valuation_amount = st.session_state.crm_data.get("valuation_amount")
+        valuation_display = format_currency_display(valuation_amount, st.session_state.crm_data.get("valuation_display", ""))
+        st.metric("Valuation", valuation_display)
+    
+    # Team and Description
+    st.subheader("👥 Team")
+    st.write(st.session_state.crm_data.get("assign", "Not mentioned"))
+    
+    st.subheader("📝 Description")
+    st.write(st.session_state.crm_data.get("description", "Not mentioned"))
+    
+    # Raw CRM data for debugging
+    with st.expander("🔍 Raw CRM Data (Debug)"):
+        st.json(st.session_state.crm_data)
+    
+    if st.button("❌ Close CRM Summary"):
+        st.session_state.show_crm_summary = False
+        st.rerun()
 
-        st.markdown(card_html, unsafe_allow_html=True)
-
-# Display comprehensive analysis if requested
-if st.session_state.get('show_comprehensive_analysis', False):
-    st.markdown("### 📊 Comprehensive VC Analysis")
-    with st.spinner("🔍 Generating comprehensive analysis..."):
+# Comprehensive Analysis Display
+if st.session_state.show_comprehensive_analysis and st.session_state.parsed_doc:
+    st.header("🔍 Comprehensive Analysis")
+    
+    with st.spinner("🧠 Generating comprehensive analysis..."):
         analysis = extract_comprehensive_analysis(st.session_state.parsed_doc)
         st.markdown(analysis)
-    st.session_state.show_comprehensive_analysis = False
-
-# Display CRM summary if requested
-if st.session_state.get('show_crm_summary', False):
-    st.markdown("### 📋 CRM Data Summary")
-    if st.session_state.crm_data:
-        st.json(st.session_state.crm_data)
-    else:
-        st.warning("No CRM data available. Please upload a pitch deck first.")
-    st.session_state.show_crm_summary = False
-
-# Chat interface
-if st.session_state.file_uploaded:
-    st.markdown("### 💬 AI Chat Interface")
     
-    # Display selected chat if any
-    if st.session_state.selected_chat_index is not None:
-        selected_chat = st.session_state.chat_history[st.session_state.selected_chat_index]
-        st.markdown(f"**Previous Question:** {selected_chat[0]}")
-        st.markdown(f"**Answer:** {selected_chat[1]}")
-        st.markdown(f"**Time:** {selected_chat[2]}")
-        if st.button("🔄 Ask New Question"):
+    if st.button("❌ Close Analysis"):
+        st.session_state.show_comprehensive_analysis = False
+        st.rerun()
+
+# Selected Section Display
+if st.session_state.selected_section and st.session_state.sections:
+    st.header(f"📁 {st.session_state.selected_section}")
+    section_content = st.session_state.sections.get(st.session_state.selected_section, "")
+    st.write(section_content)
+    
+    if st.button("❌ Close Section"):
+        st.session_state.selected_section = None
+        st.rerun()
+
+# Chat History Display
+if st.session_state.selected_chat_index is not None and st.session_state.chat_history:
+    chat_index = st.session_state.selected_chat_index
+    if 0 <= chat_index < len(st.session_state.chat_history):
+        user_msg, bot_msg, timestamp = st.session_state.chat_history[chat_index]
+        
+        st.header(f"💬 Chat History - Q{chat_index + 1}")
+        st.info(f"**Question:** {user_msg}")
+        st.success(f"**Answer:** {bot_msg}")
+        st.caption(f"Asked at: {timestamp}")
+        
+        if st.button("❌ Close Chat"):
             st.session_state.selected_chat_index = None
             st.rerun()
-    
-    # Chat input
-  # Replace the problematic section around line 850-870 with this fixed version:
 
-# Chat input using form (RECOMMENDED APPROACH)
-if st.session_state.selected_chat_index is None:
-    # Quick action buttons
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col1:
-        if st.button("🚀 Quick Analysis", use_container_width=True):
-            user_query = "Give me a quick analysis of this pitch deck"
-            st.session_state.process_query = user_query
-    with col2:
-        if st.button("💰 Investment Potential", use_container_width=True):
-            user_query = "What's the investment potential of this company?"
-            st.session_state.process_query = user_query
-    with col3:
-        if st.button("⚠️ Risk Assessment", use_container_width=True):
-            user_query = "What are the main risks with this investment?"
-            st.session_state.process_query = user_query
+# Chat Interface
+if st.session_state.file_uploaded:
+    st.header("💬 Ask Questions About the Pitch Deck")
     
-    # Chat form
-    with st.form("chat_form", clear_on_submit=True):
-        user_query = st.text_input("💭 Ask anything about this pitch deck:")
-        submitted = st.form_submit_button("Send")
-        
-        if submitted and user_query:
-            st.session_state.process_query = user_query
+    # Enhanced quick questions
+    st.subheader("🚀 Quick Questions")
+    quick_questions = [
+        "What is the funding ask amount?",
+        "Who are the founders?",
+        "What is the current revenue?",
+        "What is the company valuation?",
+        "What sector does the company operate in?",
+        "What stage is the company in?",
+        "What does the company do?",
+        "What is the market size?",
+        "Who are the competitors?",
+        "What is the business model?"
+    ]
     
-    # Process query if one exists
-    if st.session_state.get('process_query'):
-        user_query = st.session_state.process_query
-        del st.session_state.process_query  # Clear it
-        
-        if user_query:
-            with st.spinner("🤔 Analyzing your question..."):
-                # Check if it's a specific CRM query
-                crm_field = is_specific_crm_query(user_query)
+    cols = st.columns(2)
+    for i, question in enumerate(quick_questions):
+        with cols[i % 2]:
+            if st.button(question, key=f"quick_{i}"):
+                # Process quick question
+                crm_field = is_specific_crm_query(question)
                 if crm_field and st.session_state.crm_data:
                     response = generate_crm_response(crm_field, st.session_state.crm_data)
                 else:
-                    # Check if web search is needed
-                    search_keywords = ["market size", "competitors", "industry trends", "recent news", "company background"]
-                    needs_search = any(keyword in user_query.lower() for keyword in search_keywords)
-                    
-                    if needs_search:
-                        # Perform web search
-                        company_name = st.session_state.crm_data.get("company_name", "")
-                        sector = st.session_state.crm_data.get("sector", "")
-                        search_query = f"{company_name} {sector} {user_query}"
-                        search_results = search_serpapi(search_query)
-                        
-                        # Generate response with search results
-                        try:
-                            llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-                            prompt = f"""
-                            User Question: {user_query}
-                            
-                            Pitch Deck Content:
-                            {st.session_state.parsed_doc}
-                            
-                            Web Search Results:
-                            {search_results}
-                            
-                            Please provide a comprehensive answer combining insights from the pitch deck and web search results.
-                            """
-                            response = llm.invoke(prompt).content
-                        except Exception as e:
-                            response = f"Error generating response: {str(e)}"
-                    else:
-                        # Generate response from pitch deck only
-                        try:
-                            llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-                            prompt = f"""
-                            Based on this pitch deck content, please answer the user's question:
-                            
-                            Question: {user_query}
-                            
-                            Pitch Deck Content:
-                            {st.session_state.parsed_doc}
-                            
-                            CRM Data:
-                            {st.session_state.crm_data}
-                            
-                            Provide a detailed, insightful answer as a VC analyst would.
-                            """
-                            response = llm.invoke(prompt).content
-                        except Exception as e:
-                            response = f"Error generating response: {str(e)}"
+                    # Use LLM for complex questions
+                    try:
+                        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
+                        messages = [
+                            SystemMessage(content="You are a helpful assistant analyzing a pitch deck. Provide clear, concise answers based on the document content."),
+                            HumanMessage(content=f"Question: {question}\n\nDocument: {st.session_state.parsed_doc}")
+                        ]
+                        response = llm.invoke(messages).content
+                    except Exception as e:
+                        response = f"Error processing question: {str(e)}"
                 
                 # Add to chat history
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                st.session_state.chat_history.append((user_query, response, timestamp))
-                
-                # Display response
-                st.markdown(f"**Your Question:** {user_query}")
-                st.markdown(f"**AI Response:** {response}")
-                
-                # Automatically rerun to clear the processed query
+                st.session_state.chat_history.append((question, response, timestamp))
                 st.rerun()
-# Enhanced section viewer
-if st.session_state.get('selected_section'):
-    st.markdown(f"### 📑 Section: {st.session_state.selected_section}")
-    section_content = st.session_state.sections[st.session_state.selected_section]
-    st.markdown(section_content)
+
+    # Custom question input
+    user_question = st.text_input("💭 Ask a custom question:", placeholder="e.g., What are the key risks for this investment?")
     
-    # Add section-specific analysis
-    if st.button("🔍 Analyze This Section"):
-        with st.spinner("Analyzing section..."):
-            try:
-                llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-                analysis_prompt = f"""
-                Provide a detailed analysis of this section from a VC perspective:
-                
-                Section: {st.session_state.selected_section}
-                Content: {section_content}
-                
-                Focus on:
-                - Key insights and takeaways
-                - Strengths and weaknesses
-                - Missing information
-                - VC concerns or opportunities
-                """
-                analysis = llm.invoke(analysis_prompt).content
-                st.markdown(f"**Analysis:** {analysis}")
-            except Exception as e:
-                st.error(f"Error analyzing section: {str(e)}")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        if st.button("🔍 Get Answer", use_container_width=True):
+            if user_question:
+                with st.spinner("🧠 Analyzing..."):
+                    # Check if it's a specific CRM query
+                    crm_field = is_specific_crm_query(user_question)
+                    if crm_field and st.session_state.crm_data:
+                        response = generate_crm_response(crm_field, st.session_state.crm_data)
+                    else:
+                        # Use LLM for complex analysis
+                        try:
+                            llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
+                            messages = [
+                                SystemMessage(content="You are a senior VC analyst. Provide detailed, actionable insights based on the pitch deck content."),
+                                HumanMessage(content=f"Question: {user_question}\n\nPitch Deck Content: {st.session_state.parsed_doc}")
+                            ]
+                            response = llm.invoke(messages).content
+                        except Exception as e:
+                            response = f"Error processing question: {str(e)}"
+                    
+                    # Add to chat history
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    st.session_state.chat_history.append((user_question, response, timestamp))
+                    st.rerun()
+    
+    with col2:
+        if st.button("🌐 Web Search", use_container_width=True):
+            if user_question:
+                with st.spinner("🔍 Searching web..."):
+                    # Enhance query with company context
+                    company_name = st.session_state.crm_data.get("company_name", "") if st.session_state.crm_data else ""
+                    sector = st.session_state.crm_data.get("sector", "") if st.session_state.crm_data else ""
+                    
+                    search_query = user_question
+                    if company_name:
+                        search_query += f" {company_name}"
+                    if sector:
+                        search_query += f" {sector}"
+                    
+                    search_result = search_serpapi(search_query)
+                    
+                    # Add to chat history
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    st.session_state.chat_history.append((f"🌐 {user_question}", search_result, timestamp))
+                    st.rerun()
 
-# Footer with additional features
+    # Display latest chat response
+    if st.session_state.chat_history:
+        latest_question, latest_response, latest_timestamp = st.session_state.chat_history[-1]
+        st.subheader("💬 Latest Response")
+        st.info(f"**Q:** {latest_question}")
+        st.success(f"**A:** {latest_response}")
+        st.caption(f"Asked at: {latest_timestamp}")
+
+# Footer
 st.markdown("---")
-col1, col2, col3 = st.columns(3)
+st.markdown("**Perpendo — Smart VC Pitch Evaluator** | Powered by OpenAI GPT-4o & Streamlit")
+st.markdown("🔗 [GitHub](https://github.com/your-repo) | 📧 [Support](mailto:support@perpendo.com)")
 
-with col1:
-    if st.session_state.file_uploaded:
-        if st.button("📊 Generate Investment Memo"):
-            with st.spinner("Generating investment memo..."):
-                try:
-                    llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-                    memo_prompt = f"""
-                    Generate a professional investment memo based on this pitch deck:
-                    
-                    CRM Data: {st.session_state.crm_data}
-                    Full Content: {st.session_state.parsed_doc}
-                    
-                    Format as a standard VC investment memo with:
-                    - Executive Summary
-                    - Investment Thesis
-                    - Company Overview
-                    - Market Analysis
-                    - Team Assessment
-                    - Financial Analysis
-                    - Risk Assessment
-                    - Recommendation
-                    """
-                    memo = llm.invoke(memo_prompt).content
-                    st.markdown("### 📄 Investment Memo")
-                    st.markdown(memo)
-                except Exception as e:
-                    st.error(f"Error generating memo: {str(e)}")
-
-with col2:
-    if st.session_state.file_uploaded:
-        if st.button("📈 Generate Due Diligence Checklist"):
-            with st.spinner("Generating due diligence checklist..."):
-                try:
-                    llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-                    dd_prompt = f"""
-                    Create a comprehensive due diligence checklist for this startup:
-                    
-                    Company: {st.session_state.crm_data.get('company_name', 'Unknown')}
-                    Sector: {st.session_state.crm_data.get('sector', 'Unknown')}
-                    Stage: {st.session_state.crm_data.get('stage', 'Unknown')}
-                    
-                    Include specific questions for:
-                    - Legal and Corporate Structure
-                    - Financial Due Diligence
-                    - Market and Competition
-                    - Technology and IP
-                    - Team and HR
-                    - Operational Due Diligence
-                    - ESG and Compliance
-                    """
-                    checklist = llm.invoke(dd_prompt).content
-                    st.markdown("### ✅ Due Diligence Checklist")
-                    st.markdown(checklist)
-                except Exception as e:
-                    st.error(f"Error generating checklist: {str(e)}")
-
-with col3:
-    if st.session_state.file_uploaded:
-        if st.button("📊 Export Full Report"):
-            # Create comprehensive report
-            report_data = {
-                "company_info": st.session_state.crm_data,
-                "sections": st.session_state.sections,
-                "chat_history": st.session_state.chat_history,
-                "timestamp": datetime.now().isoformat()
-            }
-            
-            st.download_button(
-                label="📥 Download JSON Report",
-                data=json.dumps(report_data, indent=2),
-                file_name=f"{st.session_state.crm_data.get('company_name', 'company')}_analysis_report.json",
-                mime="application/json"
-            )
-
-# Initialize session state for new features
-for key in ["show_comprehensive_analysis", "show_crm_summary", "selected_section"]:
-    if key not in st.session_state:
-        st.session_state[key] = False
-
-# Application info
-st.markdown("---")
-st.markdown("**Perpendo** - Smart VC Pitch Evaluator | Powered by OpenAI GPT-4 & Zoho CRM Integration")
-st.markdown("*Upload pitch decks, get instant AI analysis, and seamlessly integrate with your CRM workflow.*")
+# Add some styling
+st.markdown("""
+<style>
+    .stMetric > div > div > div > div {
+        font-size: 20px;
+    }
+    .stButton > button {
+        background-color: #FF6B6B;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        padding: 0.5rem 1rem;
+        font-weight: bold;
+    }
+    .stButton > button:hover {
+        background-color: #FF5252;
+    }
+    .stExpander {
+        border: 1px solid #E0E0E0;
+        border-radius: 5px;
+        margin: 0.5rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
