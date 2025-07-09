@@ -688,10 +688,11 @@ if st.session_state.file_uploaded:
                 file_name=f"crm_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                 mime="application/json"
             )
-        
-        if st.button("❌ Close Export"):
-            st.session_state.show_crm_export = False
+            
+      if st.button("❌ Close Integration"):
+            st.session_state.show_crm_integration = False
             st.rerun()
+        
         st.markdown("---")
     
     # Show CRM integration
