@@ -20,7 +20,7 @@ if not openai_api_key:
     st.stop()
 
 # Session state initialization
-for key in ["chat_history", "parsed_doc", "file_uploaded", "sections"]:
+for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "web_context"]:
     if key not in st.session_state:
         st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
 
@@ -120,15 +120,33 @@ def evaluate_pitch_table(sections):
     except Exception as e:
         return f"⚠️ Evaluation failed: {str(e)}"
 
-# Optional web search
-def run_web_search(query):
+# Smart web search on startup/founder
+def run_auto_web_search(text):
     try:
-        search = TavilySearchAPIWrapper()
+        # Extract probable startup/founder keywords
+        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
+        query_extract_prompt = f"""
+        From the following pitch content, extract a single search query about the startup
+        that would help a VC find useful information online.
+        Respond only with the search query — no explanation.
+
+        Text:
+        {text[:2500]}
+        """
+        query = llm.invoke(query_extract_prompt).content.strip()
+        if not query:
+            return "❌ Could not generate query for web search."
+        
+        search = TavilySearchAPIWrapper(tavily_api_key=tavily_api_key)
         results = search.results(query=query, max_results=3)
+
         context = "\n\n".join(f"{r['title']}:\n{clean_text(r['content'][:800])}" for r in results if r.get("content"))
+        st.session_state.web_context = context
+
         return ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key).invoke(
-            f"Use the following search results to answer this question:\n\n{context}\n\nQuery: {query}"
+            f"Summarize the following search results for VC relevance:\n\n{context}"
         ).content.strip()
+
     except Exception as e:
         return f"🌐 Web search failed: {e}"
 
@@ -139,13 +157,21 @@ st.title("📊 Manna — VC Pitch Evaluator")
 file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
 
 if file:
-    with st.spinner("🔍 Parsing and extracting..."):
+    with st.spinner("🔍 Parsing and enriching..."):
         file_bytes = file.read()
         text = extract_pdf_text(file_bytes)
         st.session_state.parsed_doc = text
         st.session_state.sections = split_sections(text)
         st.session_state.file_uploaded = True
-    st.success("✅ File processed!")
+
+        # Auto-run web search
+        web_summary = run_auto_web_search(text)
+        st.session_state.web_summary = web_summary
+
+    st.success("✅ File processed and enriched with web results!")
+
+    with st.expander("🌐 Web Search Summary"):
+        st.markdown(st.session_state.web_summary)
 
 user_query = st.chat_input("💬 Ask a question or type 'score pitch'")
 
@@ -155,9 +181,9 @@ if user_query:
             answer = evaluate_pitch_table(st.session_state.sections)
         elif user_query.lower().startswith("search web:"):
             query = user_query.replace("search web:", "").strip()
-            answer = run_web_search(query)
+            answer = run_auto_web_search(query)
         else:
-            context = st.session_state.parsed_doc if st.session_state.file_uploaded else ""
+            context = st.session_state.parsed_doc or ""
             llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
             answer = llm.invoke(f"Context:\n{context}\n\nQuestion:\n{user_query}").content.strip()
         st.session_state.chat_history.append((user_query, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
