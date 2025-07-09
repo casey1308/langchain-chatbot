@@ -170,7 +170,7 @@ def parse_crm_data(structured_text):
     
     return crm_data
     
-    def extract_number_cr(value):
+  def extract_number_cr(value):
     """Convert '₹ 12 Cr Pre-Series A' to 12.0 (float)"""
     if not value:
         return 0.0
@@ -178,6 +178,7 @@ def parse_crm_data(structured_text):
     if match:
         return float(match.group(1))
     return 0.0
+
 
 st.warning(f"Sending data to webhook: {zoho_webhook_url}")
 
