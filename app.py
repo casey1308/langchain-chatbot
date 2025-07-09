@@ -10,6 +10,9 @@ import PyPDF2
 import logging
 import json
 from openai import OpenAIError, RateLimitError, APIError
+import threading
+import queue
+import time
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -29,9 +32,11 @@ if not openai_api_key or not serpapi_key:
     st.stop()
 
 # Initialize session state
-for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "structured_data", "selected_chat_index", "crm_data"]:
+for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "structured_data", "selected_chat_index", "crm_data", "webhook_responses"]:
     if key not in st.session_state:
         if key == "chat_history":
+            st.session_state[key] = []
+        elif key == "webhook_responses":
             st.session_state[key] = []
         elif key == "file_uploaded":
             st.session_state[key] = False
@@ -205,6 +210,7 @@ def extract_number_cr(text):
     return text  # Return original if no number found
 
 def send_to_zoho_webhook(crm_data):
+    """Send data to Zoho webhook and handle webhook testing"""
     if not zoho_webhook_url:
         logger.warning("❌ ZOHO_WEBHOOK_URL not set in .env")
         return
@@ -215,29 +221,109 @@ def send_to_zoho_webhook(crm_data):
             "company_name": crm_data.get("company_name", ""),
             "ask": extract_number_cr(crm_data.get("ask", "")),
             "valuation": extract_number_cr(crm_data.get("valuation", "")),
-            "revenue": extract_number_cr(crm_data.get("revenue", "")),  # Also convert revenue
+            "revenue": extract_number_cr(crm_data.get("revenue", "")),
             "description": crm_data.get("description", ""),
             "source": crm_data.get("source", ""),
             "assign": crm_data.get("assign", ""),
-            "received_date": crm_data.get("received_date", "")
+            "received_date": crm_data.get("received_date", ""),
+            "timestamp": datetime.now().isoformat(),
+            "test_mode": True  # Add this to indicate it's a test
         }
 
         # Debug: Show what's being sent
         logger.info(f"Sending to Zoho: {crm_payload}")
 
-        headers = {"Content-Type": "application/json"}
-        response = requests.post(zoho_webhook_url, json=crm_payload, headers=headers)
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Manna-VC-Pitch-Evaluator/1.0"
+        }
+        
+        # Send the webhook
+        response = requests.post(
+            zoho_webhook_url, 
+            json=crm_payload, 
+            headers=headers,
+            timeout=30
+        )
 
-        if response.status_code == 200:
+        if response.status_code in [200, 201, 202]:
             logger.info("✅ CRM data sent to Zoho Flow successfully")
             st.success("✅ Data sent to Zoho CRM successfully!")
+            
+            # Store the successful response
+            st.session_state.webhook_responses.append({
+                "timestamp": datetime.now().isoformat(),
+                "status": "success",
+                "status_code": response.status_code,
+                "response": response.text[:500],  # Limit response text
+                "payload": crm_payload
+            })
+            
         else:
             logger.warning(f"⚠️ Webhook error: {response.status_code} - {response.text}")
             st.warning(f"⚠️ Webhook error: {response.status_code}")
+            
+            # Store the error response
+            st.session_state.webhook_responses.append({
+                "timestamp": datetime.now().isoformat(),
+                "status": "error",
+                "status_code": response.status_code,
+                "response": response.text[:500],
+                "payload": crm_payload
+            })
 
+    except requests.exceptions.Timeout:
+        logger.error("❌ Webhook timeout")
+        st.error("❌ Webhook timeout - request took too long")
+    except requests.exceptions.ConnectionError:
+        logger.error("❌ Connection error to webhook")
+        st.error("❌ Connection error to webhook")
     except Exception as e:
         logger.error(f"❌ Failed to send to Zoho webhook: {e}")
         st.error(f"❌ Failed to send to Zoho: {e}")
+
+# Test webhook function
+def test_webhook_connection():
+    """Test webhook connection with sample data"""
+    if not zoho_webhook_url:
+        st.error("❌ ZOHO_WEBHOOK_URL not set in .env")
+        return
+    
+    test_payload = {
+        "company_name": "Test Company",
+        "ask": "1000000",
+        "valuation": "5000000",
+        "revenue": "250000",
+        "description": "Test company for webhook validation",
+        "source": "Webhook Test",
+        "assign": "Test User",
+        "received_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": datetime.now().isoformat(),
+        "test_mode": True
+    }
+    
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "Manna-VC-Pitch-Evaluator/1.0"
+        }
+        
+        response = requests.post(
+            zoho_webhook_url, 
+            json=test_payload, 
+            headers=headers,
+            timeout=30
+        )
+        
+        if response.status_code in [200, 201, 202]:
+            st.success(f"✅ Webhook test successful! Status: {response.status_code}")
+            st.json({"status": "success", "response": response.text[:200]})
+        else:
+            st.error(f"❌ Webhook test failed! Status: {response.status_code}")
+            st.json({"status": "error", "response": response.text[:200]})
+            
+    except Exception as e:
+        st.error(f"❌ Webhook test error: {str(e)}")
 
 # Check if query is asking for specific CRM data
 def is_specific_crm_query(query):
@@ -484,6 +570,35 @@ def search_serpapi(query):
 st.set_page_config(page_title="Manna — VC Pitch Evaluator", page_icon="📊")
 st.title("📊 Manna — VC Pitch Evaluator")
 
+# Add webhook testing section at the top
+st.header("🔗 Webhook Testing")
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    if st.button("🧪 Test Webhook Connection"):
+        with st.spinner("Testing webhook..."):
+            test_webhook_connection()
+
+with col2:
+    if st.button("📋 Show Webhook URL"):
+        if zoho_webhook_url:
+            st.success("✅ Webhook URL configured")
+            st.code(zoho_webhook_url[:50] + "..." if len(zoho_webhook_url) > 50 else zoho_webhook_url)
+        else:
+            st.error("❌ No webhook URL configured")
+
+with col3:
+    if st.button("📊 Webhook History"):
+        if st.session_state.webhook_responses:
+            st.subheader("Recent Webhook Responses")
+            for i, response in enumerate(reversed(st.session_state.webhook_responses[-5:])):
+                status_icon = "✅" if response['status'] == 'success' else "❌"
+                st.write(f"{status_icon} {response['timestamp'][:19]} - Status: {response['status_code']}")
+        else:
+            st.info("No webhook responses yet")
+
+st.markdown("---")
+
 # Sidebar content
 with st.sidebar:
     st.header("📋 Detected Sections")
@@ -602,7 +717,6 @@ if st.session_state.selected_chat_index is not None:
     st.markdown("---")
 
 # Upload
-# Upload
 file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
 
 if file:
@@ -613,181 +727,187 @@ if file:
         st.session_state.sections = split_sections(text)
         st.session_state.file_uploaded = True
 
-    with st.spinner("🔍 Extracting CRM data..."):
-        crm_structured_text = extract_crm_structured_data(text)
-        st.session_state.structured_data = crm_structured_text
-        st.session_state.crm_data = parse_crm_data(crm_structured_text)
+ # Extract CRM structured data
+        with st.spinner("🔄 Extracting CRM data..."):
+            structured_text = extract_crm_structured_data(text)
+            st.session_state.structured_data = structured_text
+            st.session_state.crm_data = parse_crm_data(structured_text)
+            st.session_state.crm_data['received_date'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Send to Zoho webhook automatically
+            send_to_zoho_webhook(st.session_state.crm_data)
+        
+        st.success("✅ Pitch deck processed successfully!")
+        st.rerun()
 
-        # ✅ Add received_date (upload date)
-        st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-
-        send_to_zoho_webhook(st.session_state.crm_data)
-
-    st.success("✅ Pitch deck parsed and CRM data extracted!")
-
-
+# Chat interface
+if st.session_state.file_uploaded:
+    st.header("💬 Chat with your pitch deck")
     
-    # Show CRM data preview
-    if st.session_state.crm_data:
-        st.subheader("🔗 CRM Data Preview")
-        col1, col2, col3 = st.columns(3)
+    # Display current section if selected
+    if hasattr(st.session_state, 'selected_section') and st.session_state.selected_section:
+        st.subheader(f"📋 {st.session_state.selected_section}")
+        st.markdown(st.session_state.sections[st.session_state.selected_section])
         
-        with col1:
-            company_name = st.session_state.crm_data.get('company_name', 'Not found')
-            display_name = company_name[:20] + "..." if len(company_name) > 20 else company_name
-            st.metric("Company", display_name)
+        if st.button("❌ Close Section View"):
+            del st.session_state.selected_section
+            st.rerun()
         
-        with col2:
-            st.metric("Ask", st.session_state.crm_data.get('ask', 'Not found'))
-        
-        with col3:
-            st.metric("Valuation", st.session_state.crm_data.get('valuation', 'Not found'))
-
-# Show selected section
-if hasattr(st.session_state, 'selected_section') and st.session_state.selected_section:
-    st.subheader(f"📖 {st.session_state.selected_section}")
-    st.text_area("Content", st.session_state.sections[st.session_state.selected_section], height=200)
-
-# Enhanced prompt input
-st.markdown("### 💬 Ask Questions")
-st.markdown("**Quick CRM Queries:**")
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    if st.button("💰 What is their ask?"):
-        st.session_state.auto_query = "What is their ask?"
-
-with col2:
-    if st.button("👥 Who are the founders?"):
-        st.session_state.auto_query = "Who are the founders?"
-
-with col3:
-    if st.button("💵 What is their revenue?"):
-        st.session_state.auto_query = "What is their revenue?"
-
-col4, col5, col6 = st.columns(3)
-
-with col4:
-    if st.button("🏢 Company valuation?"):
-        st.session_state.auto_query = "What is their valuation?"
-
-with col5:
-    if st.button("📋 Company description?"):
-        st.session_state.auto_query = "What does the company do?"
-
-with col6:
-    if st.button("📊 Full Analysis"):
-        st.session_state.auto_query = "Provide a comprehensive analysis of this pitch deck"
-
-st.markdown("**Example specific queries:**")
-st.markdown("- `What is their ask?` - Returns just the funding ask")
-st.markdown("- `Who are the founders?` - Returns just founder information")
-st.markdown("- `What is their revenue?` - Returns just revenue data")
-st.markdown("- `What does the company do?` - Returns just company description")
-
-# Handle auto queries
-if hasattr(st.session_state, 'auto_query') and st.session_state.auto_query:
-    user_query = st.session_state.auto_query
-    st.session_state.auto_query = None
-else:
-    user_query = st.chat_input("💬 Ask about the pitch deck...")
-
-if user_query:
-    # Clear any selected chat when asking new question
-    st.session_state.selected_chat_index = None
+        st.markdown("---")
     
-    # Check if this is a specific CRM query
-    specific_field = is_specific_crm_query(user_query)
+    # Chat input
+    user_input = st.text_input("💬 Ask me anything about this pitch deck:", placeholder="e.g., What's the founder's background?")
     
-    if specific_field and st.session_state.crm_data:
-        # Handle specific CRM queries with direct response
-        response = generate_crm_response(specific_field, st.session_state.crm_data)
+    if user_input:
+        # Add to chat history
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        st.markdown(f"**🧑 You:** {user_query}")
-        st.markdown("**🤖 Manna:**")
-        st.markdown(response)
+        with st.spinner("🤖 Generating response..."):
+            # Check if it's a specific CRM query
+            specific_field = is_specific_crm_query(user_input)
+            
+            if specific_field:
+                # Generate focused CRM response
+                response = generate_crm_response(specific_field, st.session_state.crm_data)
+            else:
+                # General chat response
+                try:
+                    llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.3)
+                    
+                    # Check if web search is needed
+                    search_keywords = ["founder background", "ceo education", "linkedin", "previous company", "experience"]
+                    needs_search = any(keyword in user_input.lower() for keyword in search_keywords)
+                    
+                    if needs_search:
+                        # Extract company name for search
+                        company_name = st.session_state.crm_data.get('company_name', '')
+                        founder_name = st.session_state.crm_data.get('assign', '')
+                        
+                        search_query = f"{founder_name} {company_name} founder background"
+                        search_results = search_serpapi(search_query)
+                        
+                        context = f"""
+                        Pitch deck content: {st.session_state.parsed_doc}
+                        
+                        Web search results for founder background:
+                        {search_results}
+                        
+                        Please provide a comprehensive answer combining both the pitch deck information and web search results.
+                        """
+                    else:
+                        context = st.session_state.parsed_doc
+                    
+                    messages = [
+                        SystemMessage(content="""You are Manna, a VC analyst AI assistant helping investors evaluate startup pitch decks. 
+                        
+                        Guidelines:
+                        - Be professional and insightful
+                        - Provide specific, actionable insights
+                        - Reference exact information from the pitch deck
+                        - Highlight missing information that would be important for due diligence
+                        - Use formatting for readability
+                        - Be direct and concise
+                        - Focus on investment-relevant information
+                        
+                        When answering questions about founders or team members, provide:
+                        - Educational background
+                        - Professional experience
+                        - Previous companies and roles
+                        - Relevant industry expertise
+                        - Any notable achievements
+                        """),
+                        HumanMessage(content=f"Based on this pitch deck content, answer this question: {user_input}\n\nContext:\n{context}")
+                    ]
+                    
+                    response = llm.invoke(messages).content
+                    
+                except Exception as e:
+                    logger.error(f"Error generating response: {e}")
+                    response = f"❌ Error generating response: {str(e)}"
         
         # Store in chat history
-        st.session_state.chat_history.append(
-            (user_query, response, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        )
-    else:
-        # Handle comprehensive queries
-        with st.spinner("🤖 Analyzing..."):
-            try:
-                context = st.session_state.parsed_doc or ""
-                llm = ChatOpenAI(
-                    model="gpt-4o", 
-                    openai_api_key=openai_api_key, 
-                    streaming=True,
-                    temperature=0.1,
-                    max_tokens=2000
-                )
-                
-                # Generate comprehensive analysis if not already done
-                if not hasattr(st.session_state, 'comprehensive_analysis'):
-                    st.session_state.comprehensive_analysis = extract_comprehensive_analysis(context)
-                
-                context_msg = f"COMPREHENSIVE ANALYSIS:\n{st.session_state.comprehensive_analysis}\n\nCRM DATA:\n{st.session_state.structured_data}\n\nFULL DOCUMENT:\n{context[:2000]}"
+        st.session_state.chat_history.append((user_input, response, timestamp))
+        
+        # Display current response
+        st.markdown(f"**🧑 You:** {user_input}")
+        st.markdown(f"**🤖 Manna:**")
+        st.markdown(response)
+        st.markdown(f"*{timestamp}*")
+        
+        # Clear input by rerunning
+        st.rerun()
 
-                # Enhanced system message for deeper analysis
-                system_msg = """You are a senior VC analyst with 15+ years of experience. Provide DEEP, actionable insights for investment decisions.
-
-                Analysis Guidelines:
-                1. Be specific and cite exact information from the deck
-                2. Provide concrete numbers, metrics, and percentages
-                3. Highlight missing critical information
-                4. Identify red flags and investment risks
-                5. Suggest specific due diligence questions
-                6. Compare against industry benchmarks when relevant
-                7. Provide clear investment recommendation rationale
-                8. Focus on scalability and market opportunity assessment
-                9. Analyze team capability for execution
-                10. Evaluate competitive moat and differentiation
-                
-                Response Format:
-                - Use clear headers and bullet points
-                - Include specific actionable insights
-                - Highlight key metrics and financial data
-                - Provide both opportunities and risks
-                - End with specific next steps or questions
-                """
-
-                messages = [
-                    SystemMessage(content=system_msg),
-                    HumanMessage(content=f"{context_msg}\n\nVC Analysis Request: {user_query}")
-                ]
-
-                # Display the conversation
-                st.markdown(f"**🧑 You:** {user_query}")
-                st.markdown("**🤖 Manna:**")
-
-                # Create a placeholder for the streaming response
-                response_placeholder = st.empty()
-                full_response = ""
-
-                # Stream the response
-                for chunk in llm.stream(messages):
-                    if hasattr(chunk, 'content') and chunk.content:
-                        full_response += chunk.content
-                        response_placeholder.markdown(full_response + "▌")
-                
-                # Remove the cursor and show final response
-                response_placeholder.markdown(full_response)
-                
-                # Store in chat history
-                st.session_state.chat_history.append(
-                    (user_query, full_response.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                )
-
-            except RateLimitError:
-                st.error("❌ Rate limit exceeded. Please try again in a minute.")
-            except APIError as e:
-                st.error(f"❌ OpenAI API error: {str(e)}")
-            except Exception as e:
-                st.error(f"❌ Unexpected error: {str(e)}")
-                logger.error(f"Analysis error: {str(e)}", exc_info=True)
+# Quick action buttons
+if st.session_state.file_uploaded:
+    st.header("⚡ Quick Actions")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("💰 Funding Ask"):
+            if st.session_state.crm_data and st.session_state.crm_data.get('ask'):
+                st.info(f"**Funding Ask:** {st.session_state.crm_data['ask']}")
+            else:
+                st.warning("Funding ask not clearly mentioned in the deck")
+    
+    with col2:
+        if st.button("💎 Valuation"):
+            if st.session_state.crm_data and st.session_state.crm_data.get('valuation'):
+                st.info(f"**Valuation:** {st.session_state.crm_data['valuation']}")
+            else:
+                st.warning("Valuation not clearly mentioned in the deck")
+    
+    with col3:
+        if st.button("📈 Revenue"):
+            if st.session_state.crm_data and st.session_state.crm_data.get('revenue'):
+                st.info(f"**Revenue:** {st.session_state.crm_data['revenue']}")
+            else:
+                st.warning("Revenue not clearly mentioned in the deck")
+    
+    with col4:
+        if st.button("👥 Founders"):
+            if st.session_state.crm_data and st.session_state.crm_data.get('assign'):
+                st.info(f"**Founders:** {st.session_state.crm_data['assign']}")
+            else:
+                st.warning("Founder information not clearly mentioned in the deck")
 
 # Footer
 st.markdown("---")
-st.markdown("**💡 Pro Tip:** Use specific queries like 'What is their ask?' for quick CRM data, or ask comprehensive questions for detailed analysis.")
+st.markdown("🚀 **Manna VC Pitch Evaluator** | Built for efficient startup evaluation")
+
+# Debug information (only show in development)
+if st.checkbox("🔧 Show Debug Info"):
+    st.subheader("Debug Information")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**Session State Keys:**")
+        for key in st.session_state.keys():
+            st.write(f"- {key}")
+    
+    with col2:
+        st.write("**Environment Variables:**")
+        st.write(f"- OpenAI API Key: {'✅ Set' if openai_api_key else '❌ Missing'}")
+        st.write(f"- SERP API Key: {'✅ Set' if serpapi_key else '❌ Missing'}")
+        st.write(f"- Zoho Webhook URL: {'✅ Set' if zoho_webhook_url else '❌ Missing'}")
+    
+    if st.session_state.crm_data:
+        st.subheader("CRM Data (Raw)")
+        st.json(st.session_state.crm_data)
+    
+    if st.session_state.webhook_responses:
+        st.subheader("Webhook Responses")
+        for i, response in enumerate(st.session_state.webhook_responses):
+            st.write(f"**Response {i+1}:**")
+            st.json(response)
+
+# Auto-refresh for webhook responses
+if st.session_state.webhook_responses:
+    # Show latest webhook status in the main area
+    latest_response = st.session_state.webhook_responses[-1]
+    if latest_response['status'] == 'success':
+        st.success(f"✅ Latest webhook sent successfully at {latest_response['timestamp'][:19]}")
+    else:
+        st.error(f"❌ Latest webhook failed at {latest_response['timestamp'][:19]} - Status: {latest_response['status_code']}")
+        
