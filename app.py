@@ -22,7 +22,7 @@ if not openai_api_key:
     st.stop()
 
 # Session state initialization
-for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "web_context"]:
+for key in ["chat_history", "parsed_doc", "file_uploaded", "sections"]:
     if key not in st.session_state:
         st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
 
@@ -122,7 +122,7 @@ def evaluate_pitch_table(sections):
     except Exception as e:
         return f"⚠️ Evaluation failed: {str(e)}"
 
-# Web search function (on any query or extracted doc)
+# Web search function (on any query)
 def search_web(query):
     try:
         wrapper = TavilySearchAPIWrapper(tavily_api_key=tavily_api_key)
@@ -150,26 +150,27 @@ st.title("📊 Manna — VC Pitch Evaluator")
 file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
 
 if file:
-    with st.spinner("🔍 Parsing and enriching..."):
+    with st.spinner("🔍 Parsing pitch deck..."):
         file_bytes = file.read()
         text = extract_pdf_text(file_bytes)
         st.session_state.parsed_doc = text
         st.session_state.sections = split_sections(text)
         st.session_state.file_uploaded = True
-        st.session_state.web_context = search_web(f"{text[:300]} news OR controversy OR lawsuit OR fraud")
+    st.success("✅ File parsed successfully!")
 
-    st.success("✅ File processed and enriched!")
-    with st.expander("🌐 Web Search Summary"):
-        st.markdown(st.session_state.web_context)
-
-user_query = st.chat_input("💬 Ask anything about the startup")
+user_query = st.chat_input("💬 Ask anything about the startup or search the web")
 
 if user_query:
     with st.spinner("🤖 Thinking..."):
         context = st.session_state.parsed_doc or ""
-        web_data = st.session_state.web_context or ""
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-        prompt = f"Context from Deck:\n{context[:2000]}\n\nContext from Web:\n{web_data[:2000]}\n\nQuestion:\n{user_query}"
+
+        if any(x in user_query.lower() for x in ["lawsuit", "legal", "search", "controversy", "reputation"]):
+            web_result = search_web(user_query)
+            prompt = f"Document Context:\n{context[:1500]}\n\nWeb Results:\n{web_result}\n\nQuestion:\n{user_query}"
+        else:
+            prompt = f"Context:\n{context[:3000]}\n\nQuestion:\n{user_query}"
+
         answer = llm.invoke(prompt).content.strip()
         st.session_state.chat_history.append((user_query, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
