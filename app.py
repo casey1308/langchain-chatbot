@@ -111,65 +111,65 @@ def extract_structured_data(text):
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
         
         extraction_prompt = """
-        Analyze this pitch deck text and extract the following information in a readable format.
+        Analyze this pitch deck text and extract the following information in key-value format.
         Look through ALL the text carefully and extract ANY information that might be relevant.
         Don't just look for obvious sections - information might be scattered throughout.
         
-        Please provide a structured analysis in the following format:
+        Please provide the extracted data in this exact key-value format:
         
-        COMPANY OVERVIEW:
-        • Company Name: [Name or Not mentioned]
-        • Description: [Brief description]
-        • Industry: [Industry/Sector]
-        • Stage: [Seed/Series A/etc or Not mentioned]
-        • Location: [Location if mentioned or Not mentioned]
+        company_name: [Company Name or Not mentioned]
+        description: [Brief company description]
+        industry: [Industry/Sector]
+        stage: [Seed/Series A/etc or Not mentioned]
+        location: [Location if mentioned or Not mentioned]
         
-        FOUNDERS & TEAM:
-        • Founder 1: [Name] - [Role] - [Background/Experience]
-        • Founder 2: [Name] - [Role] - [Background/Experience]
-        • Team Size: [Number if mentioned or Not mentioned]
+        founder_1_name: [Full Name or Not mentioned]
+        founder_1_role: [CEO/CTO/etc or Not mentioned]
+        founder_1_background: [Background/Experience or Not mentioned]
+        founder_2_name: [Full Name or Not mentioned]
+        founder_2_role: [CEO/CTO/etc or Not mentioned]
+        founder_2_background: [Background/Experience or Not mentioned]
+        team_size: [Number if mentioned or Not mentioned]
         
-        MARKET & PROBLEM:
-        • Market Size: [Size with specific numbers]
-        • Problem: [Problem being solved]
-        • Solution: [Solution provided]
-        • Target Market: [Target market description]
+        market_size: [Market size with specific numbers or Not mentioned]
+        problem: [Problem being solved or Not mentioned]
+        solution: [Solution provided or Not mentioned]
+        target_market: [Target market description or Not mentioned]
         
-        PRODUCT & TECHNOLOGY:
-        • Product Description: [Product/service description]
-        • Key Features: [Key features]
-        • Technology Stack: [Technology if mentioned]
-        • Differentiators: [What makes it unique]
+        product_description: [Product/service description or Not mentioned]
+        key_features: [Key features or Not mentioned]
+        technology_stack: [Technology if mentioned or Not mentioned]
+        differentiators: [What makes it unique or Not mentioned]
         
-        TRACTION & METRICS:
-        • Revenue: [Current revenue or Not mentioned]
-        • Customers: [Customer count/info]
-        • Growth: [Growth metrics]
-        • Users: [Active users if mentioned]
-        • Partnerships: [Key partnerships or Not mentioned]
+        revenue: [Current revenue or Not mentioned]
+        customers: [Customer count/info or Not mentioned]
+        growth: [Growth metrics or Not mentioned]
+        users: [Active users if mentioned or Not mentioned]
+        partnerships: [Key partnerships or Not mentioned]
         
-        FUNDING & FINANCIALS:
-        • Funding Ask: [Amount seeking or Not mentioned]
-        • Valuation: [Current valuation or Not mentioned]
-        • Use of Funds: [How funds will be used or Not mentioned]
-        • Previous Rounds: [Previous funding info or Not mentioned]
-        • Revenue Model: [How they make money]
-        • Pricing: [Pricing strategy if mentioned]
+        ask: [Amount seeking or Not mentioned]
+        valuation: [Current valuation or Not mentioned]
+        funding: [Previous funding info or Not mentioned]
+        use_of_funds: [How funds will be used or Not mentioned]
+        revenue_model: [How they make money or Not mentioned]
+        pricing: [Pricing strategy if mentioned or Not mentioned]
         
-        COMPETITION & STRATEGY:
-        • Competition: [Competitive landscape info if mentioned]
-        • Go-to-Market: [Marketing/sales strategy]
-        • Timeline: [Key milestones or timeline if mentioned]
+        competition: [Competitive landscape info if mentioned or Not mentioned]
+        go_to_market: [Marketing/sales strategy or Not mentioned]
+        timeline: [Key milestones or timeline if mentioned or Not mentioned]
         
-        IMPORTANT: Look for information in ALL parts of the text, not just obvious sections. 
-        Extract specific numbers, percentages, and concrete details whenever possible.
-        If you find partial information, include it rather than saying "Not mentioned".
+        IMPORTANT: 
+        1. Look for information in ALL parts of the text, not just obvious sections
+        2. Extract specific numbers, percentages, and concrete details whenever possible
+        3. If you find partial information, include it rather than saying "Not mentioned"
+        4. Keep each value on a single line
+        5. Use the exact key format shown above
         
         Text to analyze:
         """
         
         messages = [
-            SystemMessage(content="You are an expert at extracting structured data from pitch decks. Be thorough and look for information throughout the entire document, not just in obvious sections. Extract specific numbers and details whenever possible. Format the output in a clear, readable way with bullet points and sections."),
+            SystemMessage(content="You are an expert at extracting structured data from pitch decks. Be thorough and look for information throughout the entire document. Extract specific numbers and details whenever possible. Format the output EXACTLY as requested with key-value pairs."),
             HumanMessage(content=f"{extraction_prompt}\n\n{text[:6000]}")
         ]
         
@@ -317,8 +317,19 @@ with st.sidebar:
     # Show structured data with expandable view
     if st.session_state.structured_data:
         st.header("🔍 Extracted Data")
-        with st.expander("View Structured Data", expanded=False):
-            st.markdown(st.session_state.structured_data)
+        
+        # Parse and display key-value pairs in expandable format
+        with st.expander("View Key-Value Data", expanded=False):
+            if st.session_state.structured_data:
+                lines = st.session_state.structured_data.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if ':' in line and line:
+                        key, value = line.split(':', 1)
+                        key = key.strip()
+                        value = value.strip()
+                        if value and value != "Not mentioned":
+                            st.write(f"**{key}:** {value}")
         
         # Button to view full structured data
         if st.button("📄 View Full Structured Analysis"):
@@ -346,7 +357,63 @@ with st.sidebar:
 # Show full structured data if requested
 if hasattr(st.session_state, 'show_structured_data') and st.session_state.show_structured_data:
     st.header("🔍 Complete Structured Analysis")
-    st.markdown(st.session_state.structured_data)
+    
+    # Display as formatted key-value pairs
+    if st.session_state.structured_data:
+        lines = st.session_state.structured_data.split('\n')
+        
+        # Group by categories
+        current_category = "General"
+        categories = {
+            "company": "🏢 Company Information",
+            "founder": "👥 Founders & Team", 
+            "market": "📊 Market & Problem",
+            "product": "🚀 Product & Technology",
+            "revenue": "💰 Traction & Metrics",
+            "customers": "💰 Traction & Metrics",
+            "growth": "💰 Traction & Metrics",
+            "users": "💰 Traction & Metrics",
+            "partnerships": "💰 Traction & Metrics",
+            "ask": "💵 Funding & Financials",
+            "valuation": "💵 Funding & Financials",
+            "funding": "💵 Funding & Financials",
+            "use_of_funds": "💵 Funding & Financials",
+            "revenue_model": "💵 Funding & Financials",
+            "pricing": "💵 Funding & Financials",
+            "competition": "⚔️ Competition & Strategy",
+            "go_to_market": "⚔️ Competition & Strategy",
+            "timeline": "⚔️ Competition & Strategy"
+        }
+        
+        grouped_data = {}
+        for line in lines:
+            line = line.strip()
+            if ':' in line and line:
+                key, value = line.split(':', 1)
+                key = key.strip().lower()
+                value = value.strip()
+                
+                # Find category
+                category = "🔍 Other Information"
+                for cat_key, cat_name in categories.items():
+                    if cat_key in key:
+                        category = cat_name
+                        break
+                
+                if category not in grouped_data:
+                    grouped_data[category] = []
+                
+                if value and value != "Not mentioned":
+                    grouped_data[category].append((key.replace('_', ' ').title(), value))
+        
+        # Display grouped data
+        for category, items in grouped_data.items():
+            if items:
+                st.subheader(category)
+                for key, value in items:
+                    st.write(f"**{key}:** {value}")
+                st.markdown("---")
+    
     if st.button("❌ Close"):
         st.session_state.show_structured_data = False
         st.rerun()
@@ -395,7 +462,7 @@ if hasattr(st.session_state, 'selected_section') and st.session_state.selected_s
 st.markdown("### 💬 Ask Questions")
 st.markdown("**Example queries:**")
 st.markdown("- `Tell me about the founders' background and education`")
-st.markdown("- `Search for founder's LinkedIn profile and experience`")
+st.markdown("- `Search for Himanshu Gupta's LinkedIn profile and experience`")
 st.markdown("- `What is the founder's educational background?`")
 st.markdown("- `Evaluate the complete pitch deck`")
 st.markdown("- `What are the funding details?`")
@@ -458,26 +525,38 @@ if user_query:
                 )
                 
                 if should_search:
-                    # Extract founder names from structured data for better search
+                    # Extract founder names and company name from structured data for better search
                     founder_names = []
+                    company_name = ""
+                    
                     if st.session_state.structured_data:
                         try:
-                            # Try to extract names from the structured text
+                            # Parse the key-value structured data
                             lines = st.session_state.structured_data.split('\n')
                             for line in lines:
-                                if 'Founder' in line and ':' in line:
-                                    # Extract name from format like "• Founder 1: John Doe - CEO - Background"
-                                    parts = line.split(':')[1].split('-')
-                                    if parts[0].strip() and parts[0].strip() != "Not mentioned":
-                                        founder_names.append(parts[0].strip())
+                                line = line.strip()
+                                if ':' in line:
+                                    key, value = line.split(':', 1)
+                                    key = key.strip().lower()
+                                    value = value.strip()
+                                    
+                                    if 'founder' in key and 'name' in key and value and value != "Not mentioned":
+                                        founder_names.append(value)
+                                    elif key == 'company_name' and value and value != "Not mentioned":
+                                        company_name = value
                         except:
-                            # If extraction fails, try to find common names
+                            # Fallback extraction
                             if "Himanshu Gupta" in st.session_state.structured_data:
                                 founder_names.append("Himanshu Gupta")
                     
-                    # Create better search query
+                    # Create better search query with company context
                     if founder_names and matched_key in ["founder", "team"]:
-                        search_query = f"{' '.join(founder_names)} founder background education experience linkedin"
+                        if company_name:
+                            # Search with founder name + company name for more specific results
+                            search_query = f'"{founder_names[0]}" "{company_name}" founder CEO linkedin background education'
+                        else:
+                            # Search with just founder name + founder context
+                            search_query = f'"{founder_names[0]}" founder linkedin background education experience'
                     else:
                         search_query = user_query
                     
