@@ -722,7 +722,7 @@ if st.session_state.file_uploaded:
                 with st.expander(f"{status_icon} {response['timestamp'][:19]} - Status: {response['status_code']}"):
                     st.json(response)
         
-      if st.button("❌ Close Integration"):
+    if st.button("❌ Close Integration"):
             st.session_state.show_crm_integration = False
             st.rerun()
         st.markdown("---")
