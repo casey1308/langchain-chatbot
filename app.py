@@ -278,27 +278,7 @@ def parse_crm_data(structured_text):
             crm_data[f"{field}_amount"] = None
     
     return crm_data
-def validate_crm_data(crm_data):
-    """Validate CRM data quality"""
-    validation_results = {
-        "valid": True,
-        "warnings": [],
-        "errors": []
-    }
-    
-    # Check for HTML remnants
-    for key, value in crm_data.items():
-        if isinstance(value, str) and ('<div' in value or '<html' in value or '&lt;' in value):
-            validation_results["errors"].append(f"HTML content detected in {key}")
-            validation_results["valid"] = False
-    
-    # Check required fields
-    required_fields = ["company_name"]
-    for field in required_fields:
-        if not crm_data.get(field) or crm_data[field] == "Not mentioned":
-            validation_results["warnings"].append(f"Missing required field: {field}")
-    
-    return validation_results
+
 
 # Updated file processing section
 uploaded_file = st.file_uploader("Upload your pitch deck (PDF)", type=["pdf"])
