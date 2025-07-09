@@ -462,7 +462,7 @@ if hasattr(st.session_state, 'selected_section') and st.session_state.selected_s
 st.markdown("### 💬 Ask Questions")
 st.markdown("**Example queries:**")
 st.markdown("- `Tell me about the founders' background and education`")
-st.markdown("- `Search for Himanshu Gupta's LinkedIn profile and experience`")
+st.markdown("- `Search for founder's LinkedIn profile and experience`")
 st.markdown("- `What is the founder's educational background?`")
 st.markdown("- `Evaluate the complete pitch deck`")
 st.markdown("- `What are the funding details?`")
