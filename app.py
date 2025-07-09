@@ -21,28 +21,28 @@ if not openai_api_key:
     st.error("❌ OPENAI_API_KEY is missing in your .env file.")
     st.stop()
 
-# Session state initialization
+# Initialize session state
 for key in ["chat_history", "parsed_doc", "file_uploaded", "sections"]:
     if key not in st.session_state:
         st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
 
-# Text cleaner
+# Clean text
 def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     return re.sub(r"\n{2,}", "\n", text).strip()
 
-# Extract PDF content
+# Extract text from PDF
 def extract_pdf_text(file_bytes):
     reader = PyPDF2.PdfReader(BytesIO(file_bytes))
     return clean_text("\n".join(page.extract_text() or "" for page in reader.pages))
 
-# Split content by rough heading matches
+# Split by rough headings
 def split_sections(text):
     sections, current = {}, "General"
     headings = [
         "summary", "objective", "education", "experience", "projects", "skills",
         "market", "team", "business model", "financials", "revenue", "traction",
-        "competition", "go-to-market", "ask", "funding"
+        "competition", "go-to-market", "ask", "funding", "valuation", "round", "investors", "series", "cap table", "founder"
     ]
     for line in text.splitlines():
         l = line.strip()
@@ -53,49 +53,42 @@ def split_sections(text):
     return {k: "\n".join(v) for k, v in sections.items()}
 
 def match_section(key, sections):
-    matches = get_close_matches(key.lower(), [k.lower() for k in sections.keys()], n=1, cutoff=0.4)
-    if matches:
-        for k in sections:
-            if k.lower() == matches[0]:
-                return sections[k]
-    return "Not mentioned."
+    key = key.lower()
+    lookup = {
+        "founder": ["founder", "co-founder", "team", "ceo", "background"],
+        "valuation": ["valuation", "valuation cap"],
+        "ask": ["ask", "funding", "investment required"],
+        "round": ["round", "series", "pre-seed", "seed", "series a", "series b"],
+        "investor": ["investor", "cap table", "backer", "vc"]
+    }
+    if key in lookup:
+        for tag in lookup[key]:
+            for section_key in sections:
+                if tag in section_key.lower():
+                    return sections[section_key]
+        return "Not mentioned."
+    else:
+        matches = get_close_matches(key.lower(), [k.lower() for k in sections.keys()], n=1, cutoff=0.4)
+        if matches:
+            for k in sections:
+                if k.lower() == matches[0]:
+                    return sections[k]
+        return "Not mentioned."
 
-# Strict tabular scoring for Stage 1
+# Scoring logic
 def evaluate_pitch_table(sections):
     criteria = [
-        ("Problem Statement", "High"),
-        ("Offered Solution", "Medium"),
-        ("Market Size", "Low"),
-        ("Founder Background", "High"),
-        ("Business Model", "High"),
-        ("Stage of the Business", "Medium"),
-        ("Revenue Model", "Medium"),
-        ("Tech Integration", "High"),
-        ("Traction", "Medium"),
-        ("Team Dynamics", "High"),
-        ("Team Size", "Low"),
-        ("Cap Table", "High"),
-        ("Competitive Landscape", "High"),
-        ("Additional Investment Requirement", "High"),
-        ("Valuation", "Medium"),
-        ("Regulatory Impact", "Low"),
-        ("Exit Opportunity", "Low"),
+        ("Problem Statement", "High"), ("Offered Solution", "Medium"), ("Market Size", "Low"),
+        ("Founder Background", "High"), ("Business Model", "High"), ("Stage of the Business", "Medium"),
+        ("Revenue Model", "Medium"), ("Tech Integration", "High"), ("Traction", "Medium"),
+        ("Team Dynamics", "High"), ("Team Size", "Low"), ("Cap Table", "High"),
+        ("Competitive Landscape", "High"), ("Additional Investment Requirement", "High"),
+        ("Valuation", "Medium"), ("Regulatory Impact", "Low"), ("Exit Opportunity", "Low")
     ]
 
-    weight_map = {
-        "High": 0.08,
-        "Medium": 0.05,
-        "Low": 0.03
-    }
-
+    weight_map = {"High": 0.08, "Medium": 0.05, "Low": 0.03}
     prompt = (
-        "You are a VC analyst AI.\n"
-        "Evaluate the startup based on the following pitch content.\n\n"
-        "For each criterion:\n"
-        "- Give a score from 1 to 5\n"
-        "- Use the correct weight (High=0.08, Medium=0.05, Low=0.03)\n"
-        "- Write 1-line remark\n"
-        "- Write 1-line suggestion\n\n"
+        "You are a VC analyst AI.\nEvaluate the startup based on the following pitch content.\n\n"
         "Respond only in this markdown format:\n"
         "| Criterion | Score (/5) | Weightage | Weighted Score | Remarks | Suggestions |\n"
         "|-----------|-------------|-----------|----------------|---------|-------------|\n"
@@ -112,8 +105,8 @@ def evaluate_pitch_table(sections):
         "- Verdict:\n"
         "  - ✅ Consider: score ≥ 3.0\n"
         "  - ⚠️ Second Opinion: 2.25 – 2.99\n"
-        "  - ❌ Pass: score < 2.25\n\n"
-        "List required follow-up documents in bullet points (no explanations).\n"
+        "  - ❌ Pass: score < 2.25\n"
+        "- List follow-up documents in bullet points.\n"
     )
 
     try:
@@ -122,7 +115,7 @@ def evaluate_pitch_table(sections):
     except Exception as e:
         return f"⚠️ Evaluation failed: {str(e)}"
 
-# Web search function (on any query)
+# Web search (fallback only)
 def search_web(query):
     try:
         wrapper = TavilySearchAPIWrapper(tavily_api_key=tavily_api_key)
@@ -164,16 +157,35 @@ if user_query:
     with st.spinner("🤖 Thinking..."):
         context = st.session_state.parsed_doc or ""
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
+        lower_q = user_query.lower()
 
-        if any(x in user_query.lower() for x in ["lawsuit", "legal", "search", "controversy", "reputation"]):
+        direct_keys = {
+            "founder": ["founder"], "valuation": ["valuation"],
+            "ask": ["ask", "funding required"], "round": ["round", "series"],
+            "investor": ["investors", "vc", "backers"]
+        }
+
+        matched_key = next((k for k, v in direct_keys.items() if any(q in lower_q for q in v)), None)
+
+        if matched_key:
+            section_text = match_section(matched_key, st.session_state.sections)
+            if section_text == "Not mentioned.":
+                web_result = search_web(user_query)
+                prompt = f"Deck didn't include this info. Here's what I found online:\n{web_result}\n\nAnswer: {user_query}"
+                answer = llm.invoke(prompt).content.strip()
+            else:
+                answer = section_text
+        elif any(x in lower_q for x in ["lawsuit", "legal", "controversy", "reputation"]):
             web_result = search_web(user_query)
             prompt = f"Document Context:\n{context[:1500]}\n\nWeb Results:\n{web_result}\n\nQuestion:\n{user_query}"
+            answer = llm.invoke(prompt).content.strip()
         else:
             prompt = f"Context:\n{context[:3000]}\n\nQuestion:\n{user_query}"
+            answer = llm.invoke(prompt).content.strip()
 
-        answer = llm.invoke(prompt).content.strip()
         st.session_state.chat_history.append((user_query, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
+# Display chat history
 for user, bot, timestamp in st.session_state.chat_history:
     st.markdown(f"**🧑 You:** {user}")
     st.markdown(f"**🤖 Manna:**\n{bot}")
