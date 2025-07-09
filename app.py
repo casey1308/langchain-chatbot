@@ -178,28 +178,31 @@ def send_to_zoho_webhook(crm_data):
     if not zoho_webhook_url:
         logger.warning("❌ ZOHO_WEBHOOK_URL not set in .env")
         return
-  try:
-    # Preprocess values for Zoho
-crm_payload = {
-    "company_name": crm_data.get("company_name", ""),
-    "ask": extract_number_cr(crm_data.get("ask", "")),
-    "valuation": extract_number_cr(crm_data.get("valuation", "")),
-    "revenue": crm_data.get("revenue", ""),
-    "description": crm_data.get("description", ""),
-    "source": crm_data.get("source", ""),
-    "assign": crm_data.get("assign", ""),
-    "received_date": crm_data.get("received_date", "")
-}
 
-    headers = {"Content-Type": "application/json"}
-    response = requests.post(zoho_webhook_url, json=crm_payload, headers=headers)
+    try:
+        # Preprocess values for Zoho
+        crm_payload = {
+            "company_name": crm_data.get("company_name", ""),
+            "ask": extract_number_cr(crm_data.get("ask", "")),
+            "valuation": extract_number_cr(crm_data.get("valuation", "")),
+            "revenue": crm_data.get("revenue", ""),
+            "description": crm_data.get("description", ""),
+            "source": crm_data.get("source", ""),
+            "assign": crm_data.get("assign", ""),
+            "received_date": crm_data.get("received_date", "")
+        }
 
-    if response.status_code == 200:
-        logger.info("✅ CRM data sent to Zoho Flow successfully")
-    else:
-        logger.warning(f"⚠️ Webhook error: {response.status_code} - {response.text}")
-except Exception as e:
-    logger.error(f"❌ Failed to send to Zoho webhook: {e}")
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(zoho_webhook_url, json=crm_payload, headers=headers)
+
+        if response.status_code == 200:
+            logger.info("✅ CRM data sent to Zoho Flow successfully")
+        else:
+            logger.warning(f"⚠️ Webhook error: {response.status_code} - {response.text}")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to send to Zoho webhook: {e}")
+
 
 
 # Check if query is asking for specific CRM data
