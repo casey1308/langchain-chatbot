@@ -467,101 +467,102 @@ if file:
 
     # BIG CARD CRM DATA PREVIEW - INDENTED CORRECTLY!
     if st.session_state.crm_data:
-        st.subheader("🔗 CRM Data Preview")
+    st.subheader("🔗 CRM Data Preview")
 
-        card_html = """
-        <style>
-        .crm-card {
-            background: linear-gradient(120deg, #f8fafc 0%, #e0e7ef 100%);
-            border-radius: 18px;
-            box-shadow: 0 6px 32px 0 rgba(30, 41, 59, 0.12);
-            padding: 2.5rem 2rem 2rem 2rem;
-            margin-bottom: 2rem;
-            max-width: 700px;
-            margin-left: auto;
-            margin-right: auto;
-            color: #23272f;
-        }
-        .crm-card h2 {
-            font-size: 2.1rem;
-            font-weight: 800;
-            margin-bottom: 0.5rem;
-            color: #1e293b;
-            letter-spacing: -1px;
-        }
-        .crm-field {
-            margin-bottom: 1.1rem;
-        }
-        .crm-label {
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: #64748b;
-            margin-bottom: 0.18rem;
-            letter-spacing: 0.5px;
-        }
-        .crm-value {
-            font-size: 1.25rem;
-            font-weight: 600;
-            color: #23272f;
-            background: #f1f5f9;
-            border-radius: 6px;
-            padding: 0.45rem 0.8rem;
-            display: inline-block;
-        }
-        </style>
-        <div class="crm-card">
-            <h2>{company_name}</h2>
-            <div class="crm-field">
-                <span class="crm-label">Sector:</span><br>
-                <span class="crm-value">{sector}</span>
-            </div>
-            <div class="crm-field">
-                <span class="crm-label">Stage:</span><br>
-                <span class="crm-value">{stage}</span>
-            </div>
-            <div class="crm-field">
-                <span class="crm-label">Ask:</span><br>
-                <span class="crm-value">{ask}</span>
-            </div>
-            <div class="crm-field">
-                <span class="crm-label">Valuation:</span><br>
-                <span class="crm-value">{valuation}</span>
-            </div>
-            <div class="crm-field">
-                <span class="crm-label">Revenue:</span><br>
-                <span class="crm-value">{revenue}</span>
-            </div>
-            <div class="crm-field">
-                <span class="crm-label">Founders / Key Team:</span><br>
-                <span class="crm-value">{assign}</span>
-            </div>
-            <div class="crm-field">
-                <span class="crm-label">Description:</span><br>
-                <span class="crm-value">{description}</span>
-            </div>
-            <div class="crm-field">
-                <span class="crm-label">Source:</span><br>
-                <span class="crm-value">{source}</span>
-            </div>
-            <div class="crm-field">
-                <span class="crm-label">Received Date:</span><br>
-                <span class="crm-value">{received_date}</span>
-            </div>
+    card_html = """
+    <style>
+    .crm-card {{
+        background: linear-gradient(120deg, #f8fafc 0%, #e0e7ef 100%);
+        border-radius: 18px;
+        box-shadow: 0 6px 32px 0 rgba(30, 41, 59, 0.12);
+        padding: 2.5rem 2rem 2rem 2rem;
+        margin-bottom: 2rem;
+        max-width: 700px;
+        margin-left: auto;
+        margin-right: auto;
+        color: #23272f;
+    }}
+    .crm-card h2 {{
+        font-size: 2.1rem;
+        font-weight: 800;
+        margin-bottom: 0.5rem;
+        color: #1e293b;
+        letter-spacing: -1px;
+    }}
+    .crm-field {{
+        margin-bottom: 1.1rem;
+    }}
+    .crm-label {{
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #64748b;
+        margin-bottom: 0.18rem;
+        letter-spacing: 0.5px;
+    }}
+    .crm-value {{
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #23272f;
+        background: #f1f5f9;
+        border-radius: 6px;
+        padding: 0.45rem 0.8rem;
+        display: inline-block;
+    }}
+    </style>
+    <div class="crm-card">
+        <h2>{company_name}</h2>
+        <div class="crm-field">
+            <span class="crm-label">Sector:</span><br>
+            <span class="crm-value">{sector}</span>
         </div>
-        """.format(
-            company_name=st.session_state.crm_data.get("company_name", "Not found"),
-            sector=st.session_state.crm_data.get("sector", "Not found"),
-            stage=st.session_state.crm_data.get("stage", "Not found"),
-            ask=st.session_state.crm_data.get("ask", "Not found"),
-            valuation=st.session_state.crm_data.get("valuation", "Not found"),
-            revenue=st.session_state.crm_data.get("revenue", "Not found"),
-            assign=st.session_state.crm_data.get("assign", "Not found"),
-            description=st.session_state.crm_data.get("description", "Not found"),
-            source=st.session_state.crm_data.get("source", "Pitch Deck Upload"),
-            received_date=st.session_state.crm_data.get("received_date", ""),
-        )
+        <div class="crm-field">
+            <span class="crm-label">Stage:</span><br>
+            <span class="crm-value">{stage}</span>
+        </div>
+        <div class="crm-field">
+            <span class="crm-label">Ask:</span><br>
+            <span class="crm-value">{ask}</span>
+        </div>
+        <div class="crm-field">
+            <span class="crm-label">Valuation:</span><br>
+            <span class="crm-value">{valuation}</span>
+        </div>
+        <div class="crm-field">
+            <span class="crm-label">Revenue:</span><br>
+            <span class="crm-value">{revenue}</span>
+        </div>
+        <div class="crm-field">
+            <span class="crm-label">Founders / Key Team:</span><br>
+            <span class="crm-value">{assign}</span>
+        </div>
+        <div class="crm-field">
+            <span class="crm-label">Description:</span><br>
+            <span class="crm-value">{description}</span>
+        </div>
+        <div class="crm-field">
+            <span class="crm-label">Source:</span><br>
+            <span class="crm-value">{source}</span>
+        </div>
+        <div class="crm-field">
+            <span class="crm-label">Received Date:</span><br>
+            <span class="crm-value">{received_date}</span>
+        </div>
+    </div>
+    """.format(
+        company_name=st.session_state.crm_data.get("company_name", "Not found"),
+        sector=st.session_state.crm_data.get("sector", "Not found"),
+        stage=st.session_state.crm_data.get("stage", "Not found"),
+        ask=st.session_state.crm_data.get("ask", "Not found"),
+        valuation=st.session_state.crm_data.get("valuation", "Not found"),
+        revenue=st.session_state.crm_data.get("revenue", "Not found"),
+        assign=st.session_state.crm_data.get("assign", "Not found"),
+        description=st.session_state.crm_data.get("description", "Not found"),
+        source=st.session_state.crm_data.get("source", "Pitch Deck Upload"),
+        received_date=st.session_state.crm_data.get("received_date", ""),
+    )
 
-        st.markdown(card_html, unsafe_allow_html=True)
+    st.markdown(card_html, unsafe_allow_html=True)
+
 
 if hasattr(st.session_state, 'selected_section') and st.session_state.selected_section:
     st.subheader(f"📖 {st.session_state.selected_section}")
