@@ -87,26 +87,32 @@ def extract_crm_structured_data(text):
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
         extraction_prompt = """
-        Analyze this pitch deck text and extract ONLY the following CRM-specific information in exact key-value format.
+        Analyze this pitch deck and extract ONLY the following CRM-specific information in exact key-value format.
         Look through ALL the text carefully and extract specific numbers, amounts, and concrete details.
+
         CRITICAL: Use these EXACT keys and provide specific values or "Not mentioned":
+
         company_name: [Extract exact company name]
-        ask: [Extract funding amount being sought, e.g., "$2M Series A" or "Not mentioned"]
-        revenue: [Extract current revenue figures with specific numbers, e.g., "$500K ARR" or "Not mentioned"]
-        valuation: [Extract current valuation with currency and amount, e.g., "$5M pre-money" or "Not mentioned"]
+        sector: [Industry/sector, e.g., "Fintech", "Healthtech", "SaaS", or "Not mentioned"]
+        stage: [Startup stage, e.g., "Bootstrapped", "Pre-seed", "Seed", "Early", "Growth", "Series A", etc., or "Not mentioned"]
+        ask: [Funding amount being sought, e.g., "$2M Series A" or "Not mentioned"]
+        revenue: [Current revenue figures with specific numbers, e.g., "$500K ARR" or "Not mentioned"]
+        valuation: [Current valuation with currency and amount, e.g., "$5M pre-money" or "Not mentioned"]
         source: [Always put "Pitch Deck Upload"]
-        assign: [Extract founder names and key team members, e.g., "John Doe (CEO), Jane Smith (CTO)" or "Not mentioned"]
+        assign: [Founder names and key team members, e.g., "John Doe (CEO), Jane Smith (CTO)" or "Not mentioned"]
         description: [Brief 2-3 sentence description of what the company does]
+
         INSTRUCTIONS:
-        1. Extract SPECIFIC numbers and amounts wherever possible
-        2. Include currency symbols and units (K, M, B)
-        3. Look for information across ALL sections of the document
-        4. Be precise with valuation (pre-money/post-money distinction)
-        5. For ask: include round type if mentioned (Seed, Series A, etc.)
-        6. For revenue: include type if mentioned (ARR, MRR, total revenue)
-        7. For assign: include founder names and key roles
-        8. For description: keep it concise and business-focused
-        9. Source should always be "Pitch Deck Upload"
+        1. Extract SPECIFIC numbers and amounts wherever possible.
+        2. Include currency symbols and units (K, M, B).
+        3. Look for information across ALL sections of the document.
+        4. For sector and stage, infer from context if not explicitly mentioned.
+        5. For ask: include round type if mentioned (Seed, Series A, etc.).
+        6. For revenue: include type if mentioned (ARR, MRR, total revenue).
+        7. For assign: include founder names and key roles.
+        8. For description: keep it concise and business-focused.
+        9. Source should always be "Pitch Deck Upload".
+
         Text to analyze:
         """
         messages = [
@@ -128,7 +134,7 @@ def parse_crm_data(structured_text):
             key, value = line.split(':', 1)
             key = key.strip().lower()
             value = value.strip()
-            if key in ['company_name', 'ask', 'revenue', 'valuation', 'source', 'assign', 'description']:
+            if key in ['company_name', 'sector', 'stage', 'ask', 'revenue', 'valuation', 'source', 'assign', 'description']:
                 crm_data[key] = value if value and value != "Not mentioned" else ""
     return crm_data
 
@@ -141,6 +147,8 @@ def send_to_zoho_webhook(crm_data):
     try:
         crm_payload = {
             "company_name": crm_data.get("company_name", ""),
+            "sector": crm_data.get("sector", ""),
+            "stage": crm_data.get("stage", ""),
             "ask": crm_data.get("ask", ""),
             "valuation": crm_data.get("valuation", ""),
             "revenue": crm_data.get("revenue", ""),
@@ -166,6 +174,8 @@ def is_specific_crm_query(query):
         'revenue': ['revenue', 'sales', 'income', 'earnings', 'arr', 'mrr'],
         'valuation': ['valuation', 'worth', 'valued', 'pre-money', 'post-money'],
         'company': ['company name', 'what company', 'name of company'],
+        'sector': ['sector', 'industry', 'vertical'],
+        'stage': ['stage', 'bootstrapped', 'seed', 'series', 'early', 'growth'],
         'description': ['what do they do', 'what does the company do', 'business', 'product', 'service']
     }
     for field, keywords in specific_keywords.items():
@@ -182,6 +192,8 @@ def generate_crm_response(field, crm_data):
         'ask': 'ask',
         'revenue': 'revenue',
         'valuation': 'valuation',
+        'sector': 'sector',
+        'stage': 'stage',
         'description': 'description'
     }
     crm_field = field_mapping.get(field, field)
@@ -348,8 +360,8 @@ def search_serpapi(query):
     except Exception as e:
         return f"❌ Web search failed: {str(e)}"
 
-st.set_page_config(page_title="Manna — VC Pitch Evaluator", page_icon="📊")
-st.title("📊 Manna — VC Pitch Evaluator")
+st.set_page_config(page_title="Perpendo — VC Pitch Evaluator", page_icon="📊")
+st.title("📊 Perpendo — VC Pitch Evaluator")
 
 with st.sidebar:
     st.header("📋 Detected Sections")
@@ -363,7 +375,9 @@ with st.sidebar:
         st.write(f"Total text length: {len(st.session_state.parsed_doc)} chars")
     if st.session_state.crm_data:
         st.header("🔗 CRM Integration Data")
-        crm_fields = ['company_name', 'ask', 'revenue', 'valuation', 'source', 'assign', 'description']
+        crm_fields = [
+            'company_name', 'sector', 'stage', 'ask', 'revenue', 'valuation', 'source', 'assign', 'description'
+        ]
         for field in crm_fields:
             if field in st.session_state.crm_data and st.session_state.crm_data[field]:
                 display_value = st.session_state.crm_data[field]
@@ -425,7 +439,7 @@ if st.session_state.selected_chat_index is not None:
     user_q, bot_response, timestamp = chat_data
     st.header(f"💬 Chat #{st.session_state.selected_chat_index + 1}")
     st.markdown(f"**🧑 You:** {user_q}")
-    st.markdown(f"**🤖 Manna:**")
+    st.markdown(f"**🤖 Perpendo:**")
     st.markdown(bot_response)
     st.markdown(f"*{timestamp}*")
     if st.button("❌ Close Chat View"):
@@ -447,21 +461,17 @@ if file:
         crm_structured_text = extract_crm_structured_data(text)
         st.session_state.structured_data = crm_structured_text
         st.session_state.crm_data = parse_crm_data(crm_structured_text)
-        # Set date in yyyy-MM-dd format for Zoho
         st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d")
         send_to_zoho_webhook(st.session_state.crm_data)
     st.success("✅ Pitch deck parsed and CRM data extracted!")
     if st.session_state.crm_data:
         st.subheader("🔗 CRM Data Preview")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            company_name = st.session_state.crm_data.get('company_name', 'Not found')
-            display_name = company_name[:20] + "..." if len(company_name) > 20 else company_name
-            st.metric("Company", display_name)
-        with col2:
-            st.metric("Ask", st.session_state.crm_data.get('ask', 'Not found'))
-        with col3:
-            st.metric("Valuation", st.session_state.crm_data.get('valuation', 'Not found'))
+        crm_fields = [
+            'company_name', 'sector', 'stage', 'ask', 'revenue', 'valuation', 'source', 'assign', 'description'
+        ]
+        for field in crm_fields:
+            if field in st.session_state.crm_data and st.session_state.crm_data[field]:
+                st.write(f"**{field.replace('_', ' ').title()}:** {st.session_state.crm_data[field]}")
 
 if hasattr(st.session_state, 'selected_section') and st.session_state.selected_section:
     st.subheader(f"📖 {st.session_state.selected_section}")
@@ -484,16 +494,19 @@ with col4:
     if st.button("🏢 Company valuation?"):
         st.session_state.auto_query = "What is their valuation?"
 with col5:
-    if st.button("📋 Company description?"):
-        st.session_state.auto_query = "What does the company do?"
+    if st.button("🏭 Sector?"):
+        st.session_state.auto_query = "What is their sector?"
 with col6:
-    if st.button("📊 Full Analysis"):
-        st.session_state.auto_query = "Provide a comprehensive analysis of this pitch deck"
+    if st.button("🚀 Stage?"):
+        st.session_state.auto_query = "What is their stage?"
+
 st.markdown("**Example specific queries:**")
 st.markdown("- `What is their ask?` - Returns just the funding ask")
 st.markdown("- `Who are the founders?` - Returns just founder information")
 st.markdown("- `What is their revenue?` - Returns just revenue data")
 st.markdown("- `What does the company do?` - Returns just company description")
+st.markdown("- `What is their sector?` - Returns the sector/industry")
+st.markdown("- `What is their stage?` - Returns the startup stage")
 
 if hasattr(st.session_state, 'auto_query') and st.session_state.auto_query:
     user_query = st.session_state.auto_query
@@ -507,7 +520,7 @@ if user_query:
     if specific_field and st.session_state.crm_data:
         response = generate_crm_response(specific_field, st.session_state.crm_data)
         st.markdown(f"**🧑 You:** {user_query}")
-        st.markdown("**🤖 Manna:**")
+        st.markdown("**🤖 Perpendo:**")
         st.markdown(response)
         st.session_state.chat_history.append(
             (user_query, response, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -550,7 +563,7 @@ if user_query:
                     HumanMessage(content=f"{context_msg}\n\nVC Analysis Request: {user_query}")
                 ]
                 st.markdown(f"**🧑 You:** {user_query}")
-                st.markdown("**🤖 Manna:**")
+                st.markdown("**🤖 Perpendo:**")
                 response_placeholder = st.empty()
                 full_response = ""
                 for chunk in llm.stream(messages):
