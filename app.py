@@ -2,11 +2,13 @@ import streamlit as st
 import os
 import re
 import json
+import requests
 from io import BytesIO
 from dotenv import load_dotenv
 from datetime import datetime
 from difflib import get_close_matches
 import PyPDF2
+
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 
@@ -120,50 +122,26 @@ def evaluate_pitch_table(sections):
     except Exception as e:
         return f"⚠️ Evaluation failed: {str(e)}"
 
-# Smart web search on startup/founder
-def run_auto_web_search(text):
+# Web search function (on any query or extracted doc)
+def search_web(query):
     try:
-        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-        query_prompt = f"""
-        From this pitch content, generate a single search query that would help a VC look up any legal or reputational issues about the startup (lawsuits, fraud, controversies, etc). Respond only with the query string.
-
-        Text:
-        {text[:2000]}
-        """
-        query = llm.invoke(query_prompt).content.strip()
-
-        if not query:
-            return "❌ Could not generate a proper query for web search."
-
-        st.info(f"🔍 Running web search for: **{query}**")
-
-        tavily = TavilySearchAPIWrapper(tavily_api_key=tavily_api_key)
-
+        wrapper = TavilySearchAPIWrapper(tavily_api_key=tavily_api_key)
+        return wrapper.run(query)
+    except:
         try:
-            # Use `.run()` for simple fallback (if .results fails)
-            search_output = tavily.run(query)
-            return search_output
-        except:
-            # Backup request using `requests`
-            import requests
             headers = {"Authorization": f"Bearer {tavily_api_key}"}
-            params = {"query": query, "max_results": 3}
-            r = requests.get("https://api.tavily.com/search", headers=headers, params=params)
+            payload = {"query": query, "max_results": 3}
+            r = requests.get("https://api.tavily.com/search", headers=headers, params=payload)
             if r.status_code == 200:
-                raw = r.json()
-                articles = raw.get("results", [])
-                if not articles:
-                    return "🔍 No relevant web results found."
-                text = "\n\n".join(f"{a['title']}\n{a['content'][:800]}" for a in articles if a.get("content"))
-                return ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key).invoke(
-                    f"Summarize the following articles from a VC legal risk angle:\n\n{text}"
-                ).content.strip()
-            else:
-                return f"🌐 Web search failed: {r.status_code} {r.reason}"
-
-    except Exception as e:
-        return f"🌐 Web search failed: {str(e)}"
-
+                results = r.json().get("results", [])
+                if not results:
+                    return "🔍 No results found."
+                combined = "\n\n".join(f"{r['title']}\n{clean_text(r['content'][:700])}" for r in results if r.get("content"))
+                llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
+                return llm.invoke(f"Summarize from a VC perspective:\n{combined}").content.strip()
+            return f"🌐 Web search failed: {r.status_code} {r.reason}"
+        except Exception as e:
+            return f"🌐 Web search failed: {e}"
 
 # Streamlit UI
 st.set_page_config(page_title="Manna — VC Evaluator", page_icon="📊")
@@ -178,40 +156,23 @@ if file:
         st.session_state.parsed_doc = text
         st.session_state.sections = split_sections(text)
         st.session_state.file_uploaded = True
+        st.session_state.web_context = search_web(f"{text[:300]} news OR controversy OR lawsuit OR fraud")
 
-        # Auto-run web search
-        web_summary = run_auto_web_search(text)
-        st.session_state.web_summary = web_summary
-
-    st.success("✅ File processed and enriched with web results!")
-
+    st.success("✅ File processed and enriched!")
     with st.expander("🌐 Web Search Summary"):
-        st.markdown(st.session_state.web_summary)
+        st.markdown(st.session_state.web_context)
 
-user_query = st.chat_input("💬 Ask a question or type 'score pitch'")
+user_query = st.chat_input("💬 Ask anything about the startup")
 
 if user_query:
     with st.spinner("🤖 Thinking..."):
-        lower_query = user_query.lower()
-        if lower_query in ["score pitch", "evaluate this pitch"]:
-            answer = evaluate_pitch_table(st.session_state.sections)
-
-        elif "lawsuit" in lower_query or "legal" in lower_query or "search the web" in lower_query or "look up" in lower_query:
-            answer = run_auto_web_search(st.session_state.parsed_doc)
-
-        elif lower_query.startswith("search web:"):
-            query = lower_query.replace("search web:", "").strip()
-            answer = run_auto_web_search(query)
-
-        else:
-            context = st.session_state.parsed_doc or ""
-            llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-            answer = llm.invoke(f"Context:\n{context}\n\nQuestion:\n{user_query}").content.strip()
-
+        context = st.session_state.parsed_doc or ""
+        web_data = st.session_state.web_context or ""
+        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
+        prompt = f"Context from Deck:\n{context[:2000]}\n\nContext from Web:\n{web_data[:2000]}\n\nQuestion:\n{user_query}"
+        answer = llm.invoke(prompt).content.strip()
         st.session_state.chat_history.append((user_query, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
-
-# Show full chat history
 for user, bot, timestamp in st.session_state.chat_history:
     st.markdown(f"**🧑 You:** {user}")
     st.markdown(f"**🤖 Manna:**\n{bot}")
