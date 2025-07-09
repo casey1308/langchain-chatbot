@@ -169,20 +169,43 @@ def parse_crm_data(structured_text):
                 crm_data[key] = value if value and value != "Not mentioned" else ""
     
     return crm_data
+    
+    def extract_number_cr(value):
+    """Convert '₹ 12 Cr Pre-Series A' to 12.0 (float)"""
+    if not value:
+        return 0.0
+    match = re.search(r'([\d.]+)\s*Cr', value)
+    if match:
+        return float(match.group(1))
+    return 0.0
+
 
 def send_to_zoho_webhook(crm_data):
     if not zoho_webhook_url:
         logger.warning("❌ ZOHO_WEBHOOK_URL not set in .env")
         return
-    try:
-        headers = {"Content-Type": "application/json"}
-        response = requests.post(zoho_webhook_url, json=crm_data, headers=headers)
-        if response.status_code == 200:
-            logger.info("✅ CRM data sent to Zoho Flow successfully")
-        else:
-            logger.warning(f"⚠️ Webhook error: {response.status_code} - {response.text}")
-    except Exception as e:
-        logger.error(f"❌ Failed to send to Zoho webhook: {e}")
+  try:
+    # Preprocess values for Zoho
+crm_payload = {
+    "company_name": crm_data.get("company_name", ""),
+    "ask": extract_number_cr(crm_data.get("ask", "")),
+    "valuation": extract_number_cr(crm_data.get("valuation", "")),
+    "revenue": crm_data.get("revenue", ""),
+    "description": crm_data.get("description", ""),
+    "source": crm_data.get("source", ""),
+    "assign": crm_data.get("assign", ""),
+    "received_date": crm_data.get("received_date", "")
+}
+
+    headers = {"Content-Type": "application/json"}
+    response = requests.post(zoho_webhook_url, json=crm_payload, headers=headers)
+
+    if response.status_code == 200:
+        logger.info("✅ CRM data sent to Zoho Flow successfully")
+    else:
+        logger.warning(f"⚠️ Webhook error: {response.status_code} - {response.text}")
+except Exception as e:
+    logger.error(f"❌ Failed to send to Zoho webhook: {e}")
 
 
 # Check if query is asking for specific CRM data
@@ -559,11 +582,17 @@ if file:
         st.session_state.file_uploaded = True
         
         # Extract CRM-specific structured data
-        with st.spinner("🔍 Extracting CRM data..."):
-            crm_structured_text = extract_crm_structured_data(text)
-            st.session_state.structured_data = crm_structured_text
-            st.session_state.crm_data = parse_crm_data(crm_structured_text)
-            send_to_zoho_webhook(st.session_state.crm_data)
+        # Extract CRM-specific structured data
+with st.spinner("🔍 Extracting CRM data..."):
+    crm_structured_text = extract_crm_structured_data(text)
+    st.session_state.structured_data = crm_structured_text
+    st.session_state.crm_data = parse_crm_data(crm_structured_text)
+    
+    # ✅ Add received_date (upload date)
+    st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d")
+    
+    send_to_zoho_webhook(st.session_state.crm_data)
+
 
         
     st.success("✅ Pitch deck parsed and CRM data extracted!")
