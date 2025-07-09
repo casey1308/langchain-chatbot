@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import re
-import json
 import requests
 from io import BytesIO
 from dotenv import load_dotenv
@@ -12,62 +11,74 @@ import PyPDF2
 from langchain_openai import ChatOpenAI
 from langchain.callbacks.streamlit import StreamlitCallbackHandler
 
-# Load environment variables
+# Load API keys
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 serpapi_key = os.getenv("SERPAPI_API_KEY")
 
 if not openai_api_key or not serpapi_key:
-    st.error("❌ Add your OPENAI_API_KEY and SERPAPI_API_KEY in .env")
+    st.error("❌ Please set OPENAI_API_KEY and SERPAPI_API_KEY in your .env file.")
     st.stop()
 
-# Initialize session state
+# Streamlit UI setup
+st.set_page_config(page_title="📊 Manna — VC Pitch Evaluator", page_icon="📊")
+st.title("📊 Manna — VC Pitch Evaluator")
+
+# Session init
 for key in ["chat_history", "parsed_doc", "file_uploaded", "sections"]:
     if key not in st.session_state:
         st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
 
-# Text cleaner
+# PDF text cleaning
 def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     return re.sub(r"\n{2,}", "\n", text).strip()
 
+# Extract PDF content
 def extract_pdf_text(file_bytes):
     reader = PyPDF2.PdfReader(BytesIO(file_bytes))
     return clean_text("\n".join(page.extract_text() or "" for page in reader.pages))
 
+# Section splitter
 def split_sections(text):
-    sections, current = {}, "General"
-    headings = [
-        "summary", "objective", "education", "experience", "projects", "skills",
-        "market", "team", "business model", "financials", "revenue", "traction",
-        "competition", "go-to-market", "ask", "funding", "valuation", "round",
-        "investors", "series", "cap table", "founder"
+    section_dict = {}
+    current = "General"
+    keywords = [
+        "summary", "team", "founder", "co-founder", "leadership", "valuation", "ask",
+        "funding", "round", "series", "cap table", "investors", "traction", "market",
+        "revenue", "business model", "problem", "solution", "go-to-market", "financials"
     ]
     for line in text.splitlines():
         l = line.strip()
-        if any(h in l.lower() for h in headings):
+        if any(k in l.lower() for k in keywords):
             current = l
-            sections[current] = []
-        sections.setdefault(current, []).append(l)
-    return {k: "\n".join(v) for k, v in sections.items()}
+            section_dict[current] = []
+        section_dict.setdefault(current, []).append(l)
+    return {k: "\n".join(v) for k, v in section_dict.items()}
 
-def match_section(query, sections):
-    key = query.lower()
-    lookup = {
-        "founder": ["founder", "co-founder", "team", "ceo", "leadership"],
-        "valuation": ["valuation", "valuation cap"],
-        "ask": ["ask", "funding", "investment required", "seeking"],
-        "round": ["round", "series", "pre-seed", "seed", "series a", "series b"],
-        "investor": ["investor", "cap table", "backer", "vc", "existing investor"],
+# Match best section
+def match_section(prompt, sections):
+    synonyms = {
+        "founder": ["founder", "founders", "team", "leadership", "ceo", "management"],
+        "ask": ["ask", "funding ask", "investment", "capital requirement"],
+        "valuation": ["valuation", "valuation cap", "pre-money", "post-money"],
+        "round": ["round", "series", "seed", "pre-seed", "a round", "funding round"],
+        "investor": ["investors", "cap table", "vc", "backers", "stakeholders"]
     }
-    tags = lookup.get(key, [key])
-    for tag in tags:
-        for section_key in sections:
-            if tag in section_key.lower():
-                return sections[section_key]
-    return "Not mentioned."
+    for key, alias_list in synonyms.items():
+        if any(x in prompt.lower() for x in alias_list):
+            for section in sections:
+                if any(a in section.lower() for a in alias_list):
+                    return sections[section]
+    # fallback fuzzy
+    match = get_close_matches(prompt.lower(), [k.lower() for k in sections], n=1, cutoff=0.3)
+    if match:
+        for k in sections:
+            if match[0] in k.lower():
+                return sections[k]
+    return "Not mentioned in deck."
 
-# Web search fallback (SERP API)
+# SERP web search
 def search_serpapi(query):
     try:
         params = {
@@ -78,26 +89,22 @@ def search_serpapi(query):
         }
         r = requests.get("https://serpapi.com/search", params=params)
         if r.status_code == 200:
-            data = r.json()
-            if "organic_results" not in data:
+            results = r.json().get("organic_results", [])
+            if not results:
                 return "No search results found."
             combined = ""
-            for res in data["organic_results"]:
+            for res in results:
                 title = res.get("title", "")
                 snippet = res.get("snippet", "")
                 combined += f"{title}\n{snippet}\n\n"
             llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-            return llm.invoke(f"Summarize for a venture capital analyst:\n{combined}").content.strip()
+            return llm.invoke(f"Summarize like a VC analyst:\n{combined}").content.strip()
         return f"❌ SERP API error: {r.status_code}"
     except Exception as e:
-        return f"❌ Web search failed: {str(e)}"
+        return f"❌ SERP error: {str(e)}"
 
-# Streamlit UI
-st.set_page_config(page_title="Manna — VC Pitch Evaluator", page_icon="📊")
-st.title("📊 Manna — VC Pitch Evaluator")
-
+# Upload and parse deck
 file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
-
 if file:
     with st.spinner("📄 Parsing pitch deck..."):
         file_bytes = file.read()
@@ -108,54 +115,26 @@ if file:
     st.success("✅ Pitch deck parsed!")
 
 # Chat input
-user_query = st.chat_input("💬 Ask anything — e.g., 'Who are the founders?', 'What is their funding ask?', 'Any legal issues?'")
+user_query = st.chat_input("💬 Ask anything like 'founder', 'valuation', 'funding round', 'cap table', etc.")
 
 if user_query:
     with st.spinner("🤖 Thinking..."):
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, streaming=True)
         stream_handler = StreamlitCallbackHandler(st.empty())
 
-        context = st.session_state.parsed_doc or ""
-        lower_q = user_query.lower()
-
-        # Determine intent
-        categories = ["founder", "valuation", "ask", "round", "investor", "legal", "lawsuit", "controversy", "reputation"]
-        matched_key = next((cat for cat in categories if cat in lower_q), None)
-
-        if matched_key in ["legal", "lawsuit", "controversy", "reputation"]:
-            serp_result = search_serpapi(user_query)
-            prompt = (
-                f"The pitch deck content is:\n{context[:1500]}\n\n"
-                f"Online findings:\n{serp_result}\n\n"
-                f"As a VC analyst, answer this:\n{user_query}"
-            )
-        elif matched_key in ["founder", "valuation", "ask", "round", "investor"]:
-            section_text = match_section(matched_key, st.session_state.sections)
-            if section_text == "Not mentioned.":
-                serp_result = search_serpapi(user_query)
-                prompt = (
-                    f"The pitch deck doesn't contain this. Here's what I found online:\n{serp_result}\n\n"
-                    f"As a VC analyst, answer:\n{user_query}"
-                )
-            else:
-                prompt = (
-                    f"The following text is from the startup's pitch deck:\n\n{section_text}\n\n"
-                    f"Extract only the relevant answer to this VC-style query: {user_query}\n"
-                    f"If information is unclear or missing, respond with: ❌ Info not clearly stated in the deck."
-                )
+        section = match_section(user_query, st.session_state.sections)
+        if section == "Not mentioned in deck.":
+            web_summary = search_serpapi(user_query)
+            prompt = f"You are a VC analyst. Document lacks info. Here's web search:\n{web_summary}\n\nAnswer user query: {user_query}"
         else:
-            prompt = (
-                f"Deck Context:\n{context[:3000]}\n\n"
-                f"As a venture analyst, answer the following:\n{user_query}"
-            )
+            prompt = f"You are a VC analyst. Based on the pitch deck section:\n{section}\n\nAnswer: {user_query}"
 
-        with st.container():
-            st.markdown(f"**🧑 You:** {user_query}")
-            st.markdown("**🤖 Manna:**")
-            response = llm.invoke(prompt, callbacks=[stream_handler])
-            st.session_state.chat_history.append((user_query, response.content.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        st.markdown(f"**🧑 You:** {user_query}")
+        st.markdown("**🤖 Manna:**")
+        response = llm.invoke(prompt, callbacks=[stream_handler])
+        st.session_state.chat_history.append((user_query, response.content.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
-# Show history
+# Display chat history
 for user, bot, timestamp in st.session_state.chat_history:
-    st.markdown(f"**🧑 You:** {user}")
+    st.markdown(f"**🧑 You ({timestamp}):** {user}")
     st.markdown(f"**🤖 Manna:**\n{bot}")
