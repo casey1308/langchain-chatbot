@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain.callbacks.streamlit import StreamlitCallbackHandler
 
-# Load environment variables
+# Load .env variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 serpapi_key = os.getenv("SERPAPI_API_KEY")
@@ -25,8 +25,7 @@ for key in ["chat_history", "parsed_doc", "file_uploaded", "sections"]:
     if key not in st.session_state:
         st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
 
-# === Helper functions ===
-
+# Clean PDF text
 def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     return re.sub(r"\n{2,}", "\n", text).strip()
@@ -35,6 +34,7 @@ def extract_pdf_text(file_bytes):
     reader = PyPDF2.PdfReader(BytesIO(file_bytes))
     return clean_text("\n".join(page.extract_text() or "" for page in reader.pages))
 
+# Detect sections from PDF
 def split_sections(text):
     sections, current = {}, "General"
     headings = [
@@ -51,6 +51,7 @@ def split_sections(text):
         sections.setdefault(current, []).append(l)
     return {k: "\n".join(v) for k, v in sections.items()}
 
+# Match query to relevant section
 def match_section(key, sections):
     key = key.lower()
     lookup = {
@@ -75,6 +76,7 @@ def match_section(key, sections):
                     return sections[k]
     return "Not mentioned."
 
+# SERPAPI Web search
 def search_serpapi(query):
     try:
         params = {
@@ -94,13 +96,12 @@ def search_serpapi(query):
                 snippet = res.get("snippet", "")
                 combined += f"{title}\n{snippet}\n\n"
             llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-            return llm.invoke(f"Summarize for VC context:\n{combined}").content.strip()
+            return llm.invoke(f"Summarize for VC:\n{combined}").content.strip()
         return f"❌ SERP API error: {r.status_code}"
     except Exception as e:
         return f"❌ Web search failed: {str(e)}"
 
-# === Streamlit UI ===
-
+# UI
 st.set_page_config(page_title="Manna — VC Pitch Evaluator", page_icon="📊")
 st.title("📊 Manna — VC Pitch Evaluator")
 
@@ -115,22 +116,22 @@ if file:
         st.session_state.file_uploaded = True
     st.success("✅ Pitch deck parsed!")
 
-# === Chat Input ===
-
-user_query = st.chat_input("💬 Ask about the startup — team, valuation, cap table, ask, funding round, etc.")
+# Query input
+user_query = st.chat_input("💬 Ask about the startup: e.g. team, valuation, cap table, last round, ask...")
 
 if user_query:
     with st.spinner("🤖 Thinking..."):
         context = st.session_state.parsed_doc or ""
-        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, streaming=True)
-        stream_handler = StreamlitCallbackHandler(st.empty())
+        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
         lower_q = user_query.lower()
+        stream_handler = StreamlitCallbackHandler(st.empty())
 
+        # Fuzzy match user query
         direct_keys = {
             "founder": ["founder", "ceo"],
-            "valuation": ["valuation", "valuation cap"],
-            "ask": ["ask", "funding required", "how much raising"],
-            "round": ["round", "series", "pre-seed", "seed"],
+            "valuation": ["valuation"],
+            "ask": ["ask", "funding required", "raise", "investment"],
+            "round": ["round", "series"],
             "investor": ["investors", "vc", "backers"],
             "team": ["team", "org", "leadership"]
         }
@@ -141,30 +142,27 @@ if user_query:
             section_text = match_section(matched_key, st.session_state.sections)
             if section_text == "Not mentioned.":
                 serp_result = search_serpapi(user_query)
-                prompt = f"Deck didn’t contain this info. Here's what the web says:\n\n{serp_result}\n\nAnswer the question: {user_query}"
+                prompt = f"Deck didn’t contain this info. Here's what the web says:\n\n{serp_result}\n\nAnswer: {user_query}"
             else:
                 prompt = f"{section_text}\n\nBased on the pitch deck, answer this: {user_query}"
         elif any(x in lower_q for x in ["lawsuit", "legal", "controversy", "reputation"]):
             serp_result = search_serpapi(user_query)
-            prompt = f"Deck context:\n{context[:1500]}\n\nWeb Results:\n{serp_result}\n\nAnswer this:\n{user_query}"
+            prompt = f"Deck context:\n{context[:1500]}\n\nWeb Results:\n{serp_result}\n\nAnswer: {user_query}"
         else:
-            prompt = f"Context:\n{context[:3000]}\n\nAnswer this:\n{user_query}"
+            prompt = f"Context:\n{context[:3000]}\n\nAnswer: {user_query}"
 
         st.markdown(f"**🧑 You:** {user_query}")
         st.markdown("**🤖 Manna:**")
 
-        # Streaming line-by-line output
-        for chunk in llm.stream(prompt, callbacks=[stream_handler]):
-            pass
+        try:
+            response = llm.invoke(prompt, callbacks=[stream_handler])
+            final = response.content.strip()
+        except Exception as e:
+            final = f"⚠️ Error while responding: {str(e)}"
 
-        # Final response (stored in history)
-        final_response = llm.invoke(prompt)
-        st.session_state.chat_history.append(
-            (user_query, final_response.content.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        )
+        st.session_state.chat_history.append((user_query, final, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
-# === Display Chat History ===
-
+# Chat history
 for user, bot, timestamp in st.session_state.chat_history:
     st.markdown(f"**🧑 You:** {user}")
     st.markdown(f"**🤖 Manna:**\n{bot}")
