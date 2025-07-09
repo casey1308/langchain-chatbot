@@ -297,7 +297,7 @@ def test_webhook_connection():
         "description": "Test company for webhook validation",
         "source": "Webhook Test",
         "assign": "Test User",
-        "received_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "received_date": datetime.now().strftime("%Y-%m-%d"),
         "timestamp": datetime.now().isoformat(),
         "test_mode": True
     }
