@@ -688,11 +688,10 @@ if st.session_state.file_uploaded:
                 file_name=f"crm_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                 mime="application/json"
             )
-            
-      if st.button("❌ Close Integration"):
-            st.session_state.show_crm_integration = False
-            st.rerun()
         
+        if st.button("❌ Close Export"):
+            st.session_state.show_crm_export = False
+            st.rerun()
         st.markdown("---")
     
     # Show CRM integration
@@ -723,12 +722,12 @@ if st.session_state.file_uploaded:
                 with st.expander(f"{status_icon} {response['timestamp'][:19]} - Status: {response['status_code']}"):
                     st.json(response)
         
-    if st.button("❌ Close Integration"):
+        if st.button("❌ Close Integration"):
             st.session_state.show_crm_integration = False
             st.rerun()
         st.markdown("---")
-    
-    # Chat interface
+
+ # Chat interface
     st.header("💬 Ask Questions About This Pitch")
     
     # Display chat history
