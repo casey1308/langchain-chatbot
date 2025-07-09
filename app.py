@@ -1,4 +1,61 @@
-import streamlit as st
+# Google SERP API fallback
+def search_serpapi(query):
+    try:
+        params = {
+            "engine": "google",
+            "q": query,
+            "api_key": serpapi_key,
+            "num": 5  # Increased from 3 to get more results
+        }
+        r = requests.get("https://serpapi.com/search", params=params)
+        if r.status_code == 200:
+            data = r.json()
+            if "organic_results" not in data:
+                return "No search results found."
+            
+            combined = ""
+            for res in data["organic_results"]:
+                title = res.get("title", "")
+                snippet = res.get("snippet", "")
+                link = res.get("link", "")
+                combined += f"Title: {title}\nSnippet: {snippet}\nSource: {link}\n\n"
+            
+            # Also check for people_also_ask results for founder queries
+            if "people_also_ask" in data:
+                combined += "\n--- Related Questions ---\n"
+                for paa in data["people_also_ask"][:3]:  # Top 3 related questions
+                    combined += f"Q: {paa.get('question', '')}\nA: {paa.get('snippet', '')}\n\n"
+            
+            # Check for knowledge graph results (good for person info)
+            if "knowledge_graph" in data:
+                kg = data["knowledge_graph"]
+                combined += "\n--- Knowledge Graph ---\n"
+                if "title" in kg:
+                    combined += f"Title: {kg['title']}\n"
+                if "description" in kg:
+                    combined += f"Description: {kg['description']}\n"
+                if "attributes" in kg:
+                    for attr_name, attr_value in kg["attributes"].items():
+                        combined += f"{attr_name}: {attr_value}\n"
+                combined += "\n"
+            
+            llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
+            
+            # Enhanced prompt for founder/background searches
+            if any(x in query.lower() for x in ["founder", "background", "education", "experience", "linkedin", "profile"]):
+                search_prompt = f"""Analyze these search results and provide a comprehensive summary focusing on:
+                1. Educational background (universities, degrees, graduation years)
+                2. Professional experience (previous companies, roles, duration)
+                3. Notable achievements or recognition
+                4. LinkedIn profile information if available
+                5. Any relevant industry expertise
+                6. Entrepreneurial history
+                
+                Be specific about dates, companies, and roles. If information is limited, mention what's available.
+                
+                Search results:\n{combined}"""
+            else:
+                search_prompt = f"Summarize these search results forimport streamlit as st
 import os
 import re
 import requests
@@ -251,7 +308,24 @@ def search_serpapi(query):
                 snippet = res.get("snippet", "")
                 combined += f"{title}\n{snippet}\n\n"
             llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-            return llm.invoke(f"Summarize for a VC:\n{combined}").content.strip()
+            
+            # Enhanced prompt for founder/background searches
+            if any(x in query.lower() for x in ["founder", "background", "education", "experience", "linkedin", "profile"]):
+                search_prompt = f"""Analyze these search results and provide a comprehensive summary focusing on:
+                1. Educational background (universities, degrees, graduation years)
+                2. Professional experience (previous companies, roles, duration)
+                3. Notable achievements or recognition
+                4. LinkedIn profile information if available
+                5. Any relevant industry expertise
+                6. Entrepreneurial history
+                
+                Be specific about dates, companies, and roles. If information is limited, mention what's available.
+                
+                Search results:\n{combined}"""
+            else:
+                search_prompt = f"Summarize these search results for a VC investor:\n{combined}"
+            
+            return llm.invoke(search_prompt).content.strip()
         return f"❌ SERP API error: {r.status_code}"
     except Exception as e:
         return f"❌ Web search failed: {str(e)}"
@@ -321,6 +395,14 @@ if hasattr(st.session_state, 'selected_section') and st.session_state.selected_s
     st.text_area("Content", st.session_state.sections[st.session_state.selected_section], height=200)
 
 # Prompt input
+st.markdown("### 💬 Ask Questions")
+st.markdown("**Example queries:**")
+st.markdown("- `Tell me about the founders' background and education`")
+st.markdown("- `Search for Himanshu Gupta's LinkedIn profile and experience`")
+st.markdown("- `What is the founder's educational background?`")
+st.markdown("- `Evaluate the complete pitch deck`")
+st.markdown("- `What are the funding details?`")
+
 user_query = st.chat_input("💬 Ask about founders, funding, valuation, team, etc.")
 
 if user_query:
@@ -367,13 +449,42 @@ if user_query:
                 context_msg = f"FULL PITCH DECK CONTENT:\n{all_sections_text}\n\nSTRUCTURED DATA ANALYSIS:\n{st.session_state.structured_data}\n\nORIGINAL DOCUMENT:\n{context[:1000]}"
             elif matched_key:
                 section_text = match_section(matched_key, st.session_state.sections, st.session_state.structured_data)
-                if section_text == "Not mentioned in deck.":
-                    web_result = search_serpapi(user_query)
-                    context_msg = f"Deck Analysis: {section_text}\n\nWeb Search Results:\n{web_result}"
+                
+                # Check if we should search for additional info
+                should_search = (
+                    section_text == "Not mentioned in deck." or
+                    (matched_key in ["founder", "team"] and any(x in lower_q for x in ["background", "education", "experience", "linkedin", "profile", "bio", "career", "history"])) or
+                    any(x in lower_q for x in ["search", "find", "look up", "research", "web search", "google"])
+                )
+                
+                if should_search:
+                    # Extract founder names from structured data for better search
+                    founder_names = []
+                    if st.session_state.structured_data:
+                        try:
+                            import json
+                            structured_json = json.loads(st.session_state.structured_data)
+                            if "founders" in structured_json:
+                                for founder in structured_json["founders"]:
+                                    if founder.get("name") and founder["name"] != "Not mentioned":
+                                        founder_names.append(founder["name"])
+                        except:
+                            # If JSON parsing fails, try to extract names from text
+                            if "Himanshu Gupta" in st.session_state.structured_data:
+                                founder_names.append("Himanshu Gupta")
+                    
+                    # Create better search query
+                    if founder_names and matched_key in ["founder", "team"]:
+                        search_query = f"{' '.join(founder_names)} founder background education experience linkedin"
+                    else:
+                        search_query = user_query
+                    
+                    web_result = search_serpapi(search_query)
+                    context_msg = f"Deck Analysis: {section_text}\n\nWeb Search Results for '{search_query}':\n{web_result}"
                 else:
                     # Include structured data context
                     context_msg = f"Deck Section ({matched_key}):\n{section_text}\n\nStructured Data:\n{st.session_state.structured_data[:1000]}"
-            elif any(x in lower_q for x in ["lawsuit", "legal", "controversy", "reputation", "news"]):
+            elif any(x in lower_q for x in ["lawsuit", "legal", "controversy", "reputation", "news", "background", "education", "linkedin", "profile", "search", "find", "look up", "research", "web search", "google"]):
                 web_result = search_serpapi(user_query)
                 context_msg = f"Deck Context:\n{context[:1000]}\n\nWeb Research:\n{web_result}"
             else:
