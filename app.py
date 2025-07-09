@@ -170,9 +170,39 @@ def parse_crm_data(structured_text):
     
     return crm_data
     
-
-
-st.warning(f"Sending data to webhook: {zoho_webhook_url}")
+def extract_number_cr(text):
+    """Extract numeric values from text for CRM (handles M, K, B suffixes)"""
+    if not text or text == "Not mentioned":
+        return ""
+    
+    import re
+    
+    # Remove common prefixes and clean the text
+    text = re.sub(r'[$£€¥₹]', '', text)  # Remove currency symbols
+    text = re.sub(r'[,\s]', '', text)    # Remove commas and spaces
+    
+    # Look for patterns like 2M, 500K, 1.5B, etc.
+    pattern = r'(\d+(?:\.\d+)?)\s*([KMB])'
+    match = re.search(pattern, text.upper())
+    
+    if match:
+        number = float(match.group(1))
+        suffix = match.group(2)
+        
+        # Convert to actual number
+        if suffix == 'K':
+            return str(int(number * 1000))
+        elif suffix == 'M':
+            return str(int(number * 1000000))
+        elif suffix == 'B':
+            return str(int(number * 1000000000))
+    
+    # If no suffix found, try to extract just the number
+    number_match = re.search(r'(\d+(?:\.\d+)?)', text)
+    if number_match:
+        return str(int(float(number_match.group(1))))
+    
+    return text  # Return original if no number found
 
 def send_to_zoho_webhook(crm_data):
     if not zoho_webhook_url:
@@ -180,30 +210,34 @@ def send_to_zoho_webhook(crm_data):
         return
 
     try:
-        # Preprocess values for Zoho
+        # Preprocess values for Zoho - convert ask and valuation to numbers
         crm_payload = {
             "company_name": crm_data.get("company_name", ""),
             "ask": extract_number_cr(crm_data.get("ask", "")),
             "valuation": extract_number_cr(crm_data.get("valuation", "")),
-            "revenue": crm_data.get("revenue", ""),
+            "revenue": extract_number_cr(crm_data.get("revenue", "")),  # Also convert revenue
             "description": crm_data.get("description", ""),
             "source": crm_data.get("source", ""),
             "assign": crm_data.get("assign", ""),
             "received_date": crm_data.get("received_date", "")
         }
 
+        # Debug: Show what's being sent
+        logger.info(f"Sending to Zoho: {crm_payload}")
+
         headers = {"Content-Type": "application/json"}
         response = requests.post(zoho_webhook_url, json=crm_payload, headers=headers)
 
         if response.status_code == 200:
             logger.info("✅ CRM data sent to Zoho Flow successfully")
+            st.success("✅ Data sent to Zoho CRM successfully!")
         else:
             logger.warning(f"⚠️ Webhook error: {response.status_code} - {response.text}")
+            st.warning(f"⚠️ Webhook error: {response.status_code}")
 
     except Exception as e:
         logger.error(f"❌ Failed to send to Zoho webhook: {e}")
-
-
+        st.error(f"❌ Failed to send to Zoho: {e}")
 
 # Check if query is asking for specific CRM data
 def is_specific_crm_query(query):
@@ -585,7 +619,7 @@ if file:
         st.session_state.crm_data = parse_crm_data(crm_structured_text)
         
         # ✅ Add received_date (upload date)
-        st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d")
+       st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
         
         send_to_zoho_webhook(st.session_state.crm_data)
     
