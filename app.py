@@ -1,7 +1,6 @@
 import streamlit as st
 import os
 import re
-import json
 import requests
 from io import BytesIO
 from dotenv import load_dotenv
@@ -12,7 +11,7 @@ import PyPDF2
 from langchain_openai import ChatOpenAI
 from langchain.callbacks.streamlit import StreamlitCallbackHandler
 
-# Load .env
+# Load keys
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 serpapi_key = os.getenv("SERPAPI_API_KEY")
@@ -35,7 +34,7 @@ def extract_pdf_text(file_bytes):
     reader = PyPDF2.PdfReader(BytesIO(file_bytes))
     return clean_text("\n".join(page.extract_text() or "" for page in reader.pages))
 
-# Headings split
+# Section splitting
 def split_sections(text):
     sections, current = {}, "General"
     headings = [
@@ -52,7 +51,7 @@ def split_sections(text):
         sections.setdefault(current, []).append(l)
     return {k: "\n".join(v) for k, v in sections.items()}
 
-# Fuzzy matcher
+# Match section
 def match_section(key, sections):
     key = key.lower()
     lookup = {
@@ -61,7 +60,7 @@ def match_section(key, sections):
         "ask": ["ask", "funding", "investment required"],
         "round": ["round", "series", "pre-seed", "seed", "series a", "series b"],
         "investor": ["investor", "cap table", "backer", "vc"],
-        "team": ["team", "leadership"]
+        "team": ["team", "leadership", "management"]
     }
     if key in lookup:
         for tag in lookup[key]:
@@ -91,7 +90,6 @@ def search_serpapi(query):
             data = r.json()
             if "organic_results" not in data:
                 return "No search results found."
-
             combined = ""
             for res in data["organic_results"]:
                 title = res.get("title", "")
@@ -117,19 +115,17 @@ if file:
         st.session_state.file_uploaded = True
     st.success("✅ Pitch deck parsed!")
 
-# Chat input
-user_query = st.chat_input("💬 Ask about founders, funding, cap table, team, etc.")
+user_query = st.chat_input("💬 Ask about founders, valuation, team, funding, etc.")
 
 if user_query:
     with st.spinner("🤖 Thinking..."):
         context = st.session_state.parsed_doc or ""
-        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
+        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, streaming=True)
         stream_handler = StreamlitCallbackHandler(st.empty())
         lower_q = user_query.lower()
 
-        # Match section keys
         direct_keys = {
-            "founder": ["founder", "founders", "who is the founder", "ceo"],
+            "founder": ["founder", "founders", "ceo"],
             "valuation": ["valuation", "startup valuation", "pre-money", "post-money"],
             "ask": ["ask", "funding ask", "amount asked", "investment ask"],
             "round": ["round", "previous round", "series", "pre-seed", "seed"],
@@ -143,14 +139,20 @@ if user_query:
             section_text = match_section(matched_key, st.session_state.sections)
             if section_text == "Not mentioned.":
                 web_snippet = search_serpapi(user_query)
-                prompt = f"Deck didn't include this. Here's what I found online:\n{web_snippet}\n\nAnswer this: {user_query}"
+                context_msg = f"Deck didn't include this. Here's what I found online:\n{web_snippet}"
             else:
-                prompt = f"Pitch Deck Extract:\n{section_text}\n\nAnswer this: {user_query}"
+                context_msg = f"Pitch Deck Extract:\n{section_text}"
         elif any(x in lower_q for x in ["lawsuit", "legal", "controversy", "reputation"]):
             web_snippet = search_serpapi(user_query)
-            prompt = f"Deck Context:\n{context[:1500]}\n\nWeb Results:\n{web_snippet}\n\nQuestion:\n{user_query}"
+            context_msg = f"Deck Context:\n{context[:1500]}\n\nWeb Results:\n{web_snippet}"
         else:
-            prompt = f"Context:\n{context[:3000]}\n\nQuestion:\n{user_query}"
+            context_msg = f"Context:\n{context[:3000]}"
+
+        # ✅ FIX: convert to proper message list format
+        messages = [
+            {"role": "system", "content": "You're a VC analyst. Give crisp answers using the pitch deck or web results."},
+            {"role": "user", "content": f"{context_msg}\n\nQuestion: {user_query}"}
+        ]
 
         st.markdown(f"**🧑 You:** {user_query}")
         st.markdown("**🤖 Manna:**")
@@ -158,14 +160,14 @@ if user_query:
         response_col = st.empty()
         response_text = ""
 
-        for chunk in llm.stream(prompt, callbacks=[stream_handler]):
+        for chunk in llm.stream(messages, callbacks=[stream_handler]):
             if chunk.content:
                 response_text += chunk.content
                 response_col.markdown(response_text)
 
         st.session_state.chat_history.append((user_query, response_text.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
-# Show history
+# Display chat history
 for user, bot, timestamp in st.session_state.chat_history:
     st.markdown(f"**🧑 You:** {user}")
     st.markdown(f"**🤖 Manna:**\n{bot}")
