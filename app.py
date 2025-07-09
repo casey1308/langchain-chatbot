@@ -103,49 +103,73 @@ def extract_structured_data(text):
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
         
         extraction_prompt = """
-        Analyze this pitch deck text and extract the following information in JSON format:
+        Analyze this pitch deck text and extract the following information in JSON format.
+        Look through ALL the text carefully and extract ANY information that might be relevant.
+        Don't just look for obvious sections - information might be scattered throughout.
         
         {
             "founders": [
                 {
-                    "name": "Full Name",
-                    "role": "CEO/CTO/etc",
-                    "background": "Brief background",
-                    "experience": "Relevant experience"
+                    "name": "Full Name or Not mentioned",
+                    "role": "CEO/CTO/etc or Not mentioned",
+                    "background": "Brief background or Not mentioned",
+                    "experience": "Relevant experience or Not mentioned",
+                    "linkedin": "LinkedIn profile if mentioned or Not mentioned"
                 }
             ],
             "company": {
-                "name": "Company Name",
+                "name": "Company Name or Not mentioned",
                 "description": "Brief description",
                 "industry": "Industry/Sector",
-                "stage": "Seed/Series A/etc"
+                "stage": "Seed/Series A/etc or Not mentioned",
+                "location": "Location if mentioned or Not mentioned"
             },
             "funding": {
-                "ask_amount": "Amount seeking",
-                "valuation": "Current valuation",
-                "use_of_funds": "How funds will be used",
-                "previous_rounds": "Previous funding info"
+                "ask_amount": "Amount seeking or Not mentioned",
+                "valuation": "Current valuation or Not mentioned",
+                "use_of_funds": "How funds will be used or Not mentioned",
+                "previous_rounds": "Previous funding info or Not mentioned"
             },
             "market": {
-                "size": "Market size",
+                "size": "Market size with specific numbers",
                 "problem": "Problem being solved",
-                "solution": "Solution provided"
+                "solution": "Solution provided",
+                "target_market": "Target market description"
             },
             "traction": {
-                "revenue": "Current revenue",
+                "revenue": "Current revenue or Not mentioned",
                 "customers": "Customer count/info",
-                "growth": "Growth metrics"
-            }
+                "growth": "Growth metrics",
+                "partnerships": "Key partnerships or Not mentioned",
+                "downloads": "App downloads if mentioned",
+                "users": "Active users if mentioned"
+            },
+            "product": {
+                "description": "Product/service description",
+                "features": "Key features",
+                "technology": "Technology stack if mentioned",
+                "differentiators": "What makes it unique"
+            },
+            "business_model": {
+                "revenue_model": "How they make money",
+                "pricing": "Pricing strategy if mentioned",
+                "unit_economics": "Unit economics if mentioned"
+            },
+            "team_size": "Team size if mentioned or Not mentioned",
+            "timeline": "Key milestones or timeline if mentioned",
+            "competition": "Competitive landscape info if mentioned"
         }
         
-        Extract only information that is explicitly mentioned. Use "Not mentioned" if information is not found.
+        IMPORTANT: Look for information in ALL parts of the text, not just obvious sections. 
+        Extract specific numbers, percentages, and concrete details whenever possible.
+        If you find partial information, include it rather than saying "Not mentioned".
         
         Text to analyze:
         """
         
         messages = [
-            SystemMessage(content="You are an expert at extracting structured data from pitch decks. Be precise and only extract explicitly mentioned information."),
-            HumanMessage(content=f"{extraction_prompt}\n\n{text[:4000]}")  # Limit text to avoid token limits
+            SystemMessage(content="You are an expert at extracting structured data from pitch decks. Be thorough and look for information throughout the entire document, not just in obvious sections. Extract specific numbers and details whenever possible."),
+            HumanMessage(content=f"{extraction_prompt}\n\n{text[:6000]}")  # Increased limit for more context
         ]
         
         response = llm.invoke(messages)
@@ -328,9 +352,20 @@ if user_query:
                 "competition": ["competition", "competitors", "competitive"]
             }
 
+            # Check for evaluation/analysis keywords
+            evaluation_keywords = ["evaluate", "analysis", "analyze", "review", "assessment", "overall", "summary", "complete analysis"]
+            is_evaluation = any(keyword in lower_q for keyword in evaluation_keywords)
+
             matched_key = next((k for k, v in intent_keys.items() if any(q in lower_q for q in v)), None)
 
-            if matched_key:
+            if is_evaluation:
+                # For evaluation queries, provide comprehensive context with all sections
+                all_sections_text = ""
+                for section_name, section_content in st.session_state.sections.items():
+                    all_sections_text += f"\n=== {section_name.upper()} ===\n{section_content}\n"
+                
+                context_msg = f"FULL PITCH DECK CONTENT:\n{all_sections_text}\n\nSTRUCTURED DATA ANALYSIS:\n{st.session_state.structured_data}\n\nORIGINAL DOCUMENT:\n{context[:1000]}"
+            elif matched_key:
                 section_text = match_section(matched_key, st.session_state.sections, st.session_state.structured_data)
                 if section_text == "Not mentioned in deck.":
                     web_result = search_serpapi(user_query)
@@ -354,6 +389,10 @@ if user_query:
             4. For financials: Look for specific numbers, percentages, timelines
             5. Provide VC-relevant insights and red flags
             6. If web search was used, distinguish between deck info and external research
+            7. When doing a full evaluation/analysis, systematically go through each section provided
+            8. Use the structured data analysis to cross-reference information
+            9. Look for information across ALL sections, not just the most obvious ones
+            10. If doing a comprehensive analysis, organize findings by: Company, Founders, Market, Product/Solution, Traction, Financials, and Investment Details
             """
 
             messages = [
