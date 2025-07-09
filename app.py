@@ -568,6 +568,7 @@ if st.session_state.selected_chat_index is not None:
     st.markdown("---")
 
 # Upload
+# Upload
 file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
 
 if file:
@@ -577,22 +578,19 @@ if file:
         st.session_state.parsed_doc = text
         st.session_state.sections = split_sections(text)
         st.session_state.file_uploaded = True
-        
-        # Extract CRM-specific structured data
-        # Extract CRM-specific structured data
-with st.spinner("🔍 Extracting CRM data..."):
-    crm_structured_text = extract_crm_structured_data(text)
-    st.session_state.structured_data = crm_structured_text
-    st.session_state.crm_data = parse_crm_data(crm_structured_text)
-    
-    # ✅ Add received_date (upload date)
-    st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d")
-    
-    send_to_zoho_webhook(st.session_state.crm_data)
 
-
+    with st.spinner("🔍 Extracting CRM data..."):
+        crm_structured_text = extract_crm_structured_data(text)
+        st.session_state.structured_data = crm_structured_text
+        st.session_state.crm_data = parse_crm_data(crm_structured_text)
         
+        # ✅ Add received_date (upload date)
+        st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d")
+        
+        send_to_zoho_webhook(st.session_state.crm_data)
+    
     st.success("✅ Pitch deck parsed and CRM data extracted!")
+
     
     # Show CRM data preview
     if st.session_state.crm_data:
