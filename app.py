@@ -169,6 +169,21 @@ def parse_crm_data(structured_text):
     
     return crm_data
 
+def send_to_zoho_webhook(crm_data):
+    if not zoho_webhook_url:
+        logger.warning("❌ ZOHO_WEBHOOK_URL not set in .env")
+        return
+    try:
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(zoho_webhook_url, json=crm_data, headers=headers)
+        if response.status_code == 200:
+            logger.info("✅ CRM data sent to Zoho Flow successfully")
+        else:
+            logger.warning(f"⚠️ Webhook error: {response.status_code} - {response.text}")
+    except Exception as e:
+        logger.error(f"❌ Failed to send to Zoho webhook: {e}")
+
+
 # Check if query is asking for specific CRM data
 def is_specific_crm_query(query):
     """Check if the query is asking for specific CRM information"""
@@ -547,6 +562,8 @@ if file:
             crm_structured_text = extract_crm_structured_data(text)
             st.session_state.structured_data = crm_structured_text
             st.session_state.crm_data = parse_crm_data(crm_structured_text)
+            send_to_zoho_webhook(st.session_state.crm_data)
+
         
     st.success("✅ Pitch deck parsed and CRM data extracted!")
     
