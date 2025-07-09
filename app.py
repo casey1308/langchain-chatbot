@@ -10,7 +10,6 @@ from difflib import get_close_matches
 import PyPDF2
 
 from langchain_openai import ChatOpenAI
-from langchain.callbacks.streamlit import StreamlitCallbackHandler
 
 # Load environment variables
 load_dotenv()
@@ -26,16 +25,17 @@ for key in ["chat_history", "parsed_doc", "file_uploaded", "sections"]:
     if key not in st.session_state:
         st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
 
-# Clean PDF text
+# Clean text
 def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     return re.sub(r"\n{2,}", "\n", text).strip()
 
+# PDF parsing
 def extract_pdf_text(file_bytes):
     reader = PyPDF2.PdfReader(BytesIO(file_bytes))
     return clean_text("\n".join(page.extract_text() or "" for page in reader.pages))
 
-# Sectioning logic
+# Section splitting
 def split_sections(text):
     sections, current = {}, "General"
     headings = [
@@ -75,7 +75,7 @@ def match_section(key, sections):
                     return sections[k]
     return "Not mentioned."
 
-# Google SERP API Search
+# Web search using SERP API
 def search_serpapi(query):
     try:
         params = {
@@ -89,20 +89,19 @@ def search_serpapi(query):
             data = r.json()
             if "organic_results" not in data:
                 return "No search results found."
-
             combined = ""
             for res in data["organic_results"]:
                 title = res.get("title", "")
                 snippet = res.get("snippet", "")
                 combined += f"{title}\n{snippet}\n\n"
             llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-            return llm.invoke(f"Summarize for a VC:\n{combined}").content.strip()
+            return llm.invoke(f"Summarize this for a VC evaluating the startup:\n{combined}").content.strip()
         return f"❌ SERP API error: {r.status_code}"
     except Exception as e:
         return f"❌ Web search failed: {str(e)}"
 
-# Streamlit app
-st.set_page_config(page_title="Manna — VC Evaluator", page_icon="📊")
+# Streamlit UI
+st.set_page_config(page_title="Manna — VC Pitch Evaluator", page_icon="📊")
 st.title("📊 Manna — VC Pitch Evaluator")
 
 file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
@@ -116,16 +115,16 @@ if file:
         st.session_state.file_uploaded = True
     st.success("✅ Pitch deck parsed!")
 
-# Input
-user_query = st.chat_input("💬 Ask about the startup, funding, team, legal issues, etc.")
+# Chat input
+user_query = st.chat_input("💬 Ask about the startup: founders, funding, legal, etc.")
 
 if user_query:
-    with st.spinner("🤖 Thinking..."):
+    with st.spinner("🤖 Generating response..."):
         context = st.session_state.parsed_doc or ""
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, streaming=True)
-        stream_handler = StreamlitCallbackHandler(st.container())
         lower_q = user_query.lower()
 
+        # Trigger-specific section match
         direct_keys = {
             "founder": ["founder", "ceo"],
             "valuation": ["valuation"],
@@ -133,29 +132,35 @@ if user_query:
             "round": ["round", "series"],
             "investor": ["investors", "vc", "backers"]
         }
-
         matched_key = next((k for k, v in direct_keys.items() if any(q in lower_q for q in v)), None)
 
         if matched_key:
             section_text = match_section(matched_key, st.session_state.sections)
             if section_text == "Not mentioned.":
                 serp_result = search_serpapi(user_query)
-                prompt = f"Deck didn't include this info. Here's what I found online:\n{serp_result}\n\nAnswer: {user_query}"
+                prompt = f"This was not in the deck. Found online:\n{serp_result}\n\nAnswer the question: {user_query}"
             else:
-                prompt = f"{section_text}\n\nAnswer this: {user_query}"
+                prompt = f"From the deck:\n{section_text}\n\nAnswer: {user_query}"
         elif any(x in lower_q for x in ["lawsuit", "legal", "controversy", "reputation"]):
             serp_result = search_serpapi(user_query)
-            prompt = f"Document Context:\n{context[:1500]}\n\nWeb Results:\n{serp_result}\n\nAnswer this:\n{user_query}"
+            prompt = f"Context from deck:\n{context[:1500]}\n\nWeb results:\n{serp_result}\n\nQ: {user_query}"
         else:
-            prompt = f"Context:\n{context[:3000]}\n\nQuestion:\n{user_query}"
+            prompt = f"Context:\n{context[:3000]}\n\nQ: {user_query}"
 
-        with st.container():
-            st.markdown(f"**🧑 You:** {user_query}")
-            st.markdown("**🤖 Manna:**")
-            response = llm.invoke(prompt, callbacks=[stream_handler])
-            st.session_state.chat_history.append((user_query, response.content.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        # Streaming response block
+        st.markdown(f"**🧑 You:** {user_query}")
+        st.markdown("**🤖 Manna:**")
+        response_box = st.empty()
+        streamed_response = ""
+        for chunk in llm.stream(prompt):
+            if hasattr(chunk, "content") and chunk.content:
+                streamed_response += chunk.content
+                response_box.markdown(streamed_response + "▌")
+        final_response = streamed_response.strip()
 
-# Display full chat
+        st.session_state.chat_history.append((user_query, final_response, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+
+# Show full chat history
 for user, bot, timestamp in st.session_state.chat_history:
     st.markdown(f"**🧑 You:** {user}")
     st.markdown(f"**🤖 Manna:**\n{bot}")
