@@ -225,7 +225,7 @@ def send_to_zoho_webhook(crm_data):
             "description": crm_data.get("description", ""),
             "source": crm_data.get("source", ""),
             "assign": crm_data.get("assign", ""),
-            "received_date": crm_data.get("received_date", ""),
+            "received_date": datetime.now().strftime("%b %d, %Y"),
             "timestamp": datetime.now().isoformat(),
             "test_mode": True  # Add this to indicate it's a test
         }
