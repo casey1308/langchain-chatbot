@@ -192,16 +192,24 @@ user_query = st.chat_input("💬 Ask a question or type 'score pitch'")
 
 if user_query:
     with st.spinner("🤖 Thinking..."):
-        if user_query.lower() in ["score pitch", "evaluate this pitch"]:
+        lower_query = user_query.lower()
+        if lower_query in ["score pitch", "evaluate this pitch"]:
             answer = evaluate_pitch_table(st.session_state.sections)
-        elif user_query.lower().startswith("search web:"):
-            query = user_query.replace("search web:", "").strip()
+
+        elif "lawsuit" in lower_query or "legal" in lower_query or "search the web" in lower_query or "look up" in lower_query:
+            answer = run_auto_web_search(st.session_state.parsed_doc)
+
+        elif lower_query.startswith("search web:"):
+            query = lower_query.replace("search web:", "").strip()
             answer = run_auto_web_search(query)
+
         else:
             context = st.session_state.parsed_doc or ""
             llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
             answer = llm.invoke(f"Context:\n{context}\n\nQuestion:\n{user_query}").content.strip()
+
         st.session_state.chat_history.append((user_query, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+
 
 # Show full chat history
 for user, bot, timestamp in st.session_state.chat_history:
