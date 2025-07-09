@@ -348,12 +348,21 @@ def format_crm_data_for_zoho(crm_data):
     return formatted_data
 
 def send_to_zoho_webhook(crm_data):
+    """
+    Send CRM data to Zoho webhook with robust validation and error handling.
+    Only sends if ZOHO_WEBHOOK_URL is set and company_name is present.
+    """
     if not zoho_webhook_url:
         st.error("❌ ZOHO_WEBHOOK_URL not configured in .env file")
         return False
 
+    # Validate required field
+    if not crm_data.get("company_name") or crm_data["company_name"].strip() == "":
+        st.error("❌ Company name is required for Zoho CRM integration.")
+        return False
+
     try:
-        # Remove the "data": [ ... ] wrapper
+        # Prepare payload
         zoho_payload = {
             "Company": crm_data.get("company_name", ""),
             "Industry": crm_data.get("sector", ""),
@@ -361,9 +370,9 @@ def send_to_zoho_webhook(crm_data):
             "Description": crm_data.get("description", ""),
             "Lead_Source": crm_data.get("source", "Pitch Deck Upload"),
             "Owner": crm_data.get("assign", ""),
-            "Funding_Ask": crm_data.get("ask_amount") or 0,
-            "Current_Revenue": crm_data.get("revenue_amount") or 0,
-            "Valuation": crm_data.get("valuation_amount") or 0,
+            "Funding_Ask": float(crm_data.get("ask_amount") or 0),
+            "Current_Revenue": float(crm_data.get("revenue_amount") or 0),
+            "Valuation": float(crm_data.get("valuation_amount") or 0),
             "Ask_Display": crm_data.get("ask_display", ""),
             "Revenue_Display": crm_data.get("revenue_display", ""),
             "Valuation_Display": crm_data.get("valuation_display", ""),
@@ -412,8 +421,6 @@ def display_zoho_status(webhook_success, crm_data):
     """Display Zoho integration status with details"""
     if webhook_success:
         st.success("✅ Data successfully sent to Zoho CRM!")
-        
-        # Show what was sent
         with st.expander("📋 View data sent to Zoho CRM"):
             st.json({
                 "Company": crm_data.get("company_name", ""),
@@ -430,7 +437,7 @@ def display_zoho_status(webhook_success, crm_data):
         st.warning("Check your webhook URL and internet connection")
 
 def test_zoho_connection():
-    """Test Zoho webhook connection"""
+    """Test Zoho webhook connection with a dummy payload"""
     test_data = {
         "company_name": "Test Company",
         "sector": "Technology",
@@ -445,7 +452,6 @@ def test_zoho_connection():
         "revenue_display": "$500K",
         "valuation_display": "$5M"
     }
-    
     return send_to_zoho_webhook(test_data)
 
 def is_specific_crm_query(query):
