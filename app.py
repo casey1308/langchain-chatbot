@@ -160,70 +160,90 @@ def format_currency_display(amount, original_text=""):
         return f"${amount/1000:.0f}K"
     else:
         return f"${amount:,.0f}"
-
 def extract_crm_structured_data(text):
-    """Enhanced CRM data extraction with intelligent parsing"""
+    """Enhanced CRM data extraction with better HTML handling"""
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
         extraction_prompt = """
-        You are the world's most advanced pitch deck parser. Analyze this pitch deck and extract ONLY the following information in exact key-value format.
-        Look through ALL the text meticulously and extract specific numbers, amounts, and concrete details.
-
-        CRITICAL INSTRUCTIONS:
-        1. Use these EXACT keys and provide specific values or "Not mentioned"
-        2. For financial data (ask, revenue, valuation), extract the EXACT amount mentioned
-        3. Include currency symbols and units (K, M, B) as they appear
-        4. For ask: specify the round type if mentioned (Pre-seed, Seed, Series A, etc.)
-        5. For revenue: specify the type (ARR, MRR, total revenue, GMV, etc.)
-        6. For valuation: specify if it's pre-money, post-money, or current valuation
-        7. For stage: infer from funding round, company maturity, or explicit mention
-        8. For sector: be specific (e.g., "Fintech - Digital Payments", "Healthtech - Telemedicine")
-        9. For assign: include ALL founder names with their roles
-        10. For description: provide a clear, concise 2-3 sentence business description
-
-        REQUIRED OUTPUT FORMAT:
-        company_name: [Extract exact company name]
-        sector: [Specific industry/sector with sub-category if applicable]
-        stage: [Startup stage - Pre-seed/Seed/Series A/Series B/Growth/etc.]
-        ask: [Funding amount with round type, e.g., "$2M Seed Round"]
-        revenue: [Revenue figures with type, e.g., "$500K ARR" or "$2M GMV"]
-        valuation: [Valuation with type, e.g., "$5M pre-money valuation"]
-        source: [Always "Pitch Deck Upload"]
-        assign: [Founder names with roles, e.g., "John Doe (CEO), Jane Smith (CTO)"]
-        description: [Clear business description in 2-3 sentences]
-
-        FINANCIAL DATA EXTRACTION RULES:
-        - Extract EXACT numbers with currency symbols
-        - Preserve units (K, M, B) as mentioned
-        - For ask: include round stage and total amount
-        - For revenue: include timeframe and type (monthly/annual)
-        - For valuation: include pre/post money specification
-        - If multiple numbers exist, prioritize the most recent/current
-
-        EXAMPLES:
-        ask: "$1.5M Seed Round"
-        revenue: "$200K ARR"
-        valuation: "$8M pre-money valuation"
-        assign: "Sarah Johnson (CEO), Michael Chen (CTO), Lisa Rodriguez (CMO)"
-
-        Pitch Deck Content:
+        You are a pitch deck analyzer. Extract ONLY the following information in plain text format.
+        
+        CRITICAL: Return ONLY plain text, no HTML, no markdown, no formatting.
+        
+        Extract these exact fields:
+        company_name: [Company name]
+        sector: [Industry sector]
+        stage: [Funding stage]
+        ask: [Funding amount requested]
+        revenue: [Current revenue]
+        valuation: [Company valuation]
+        source: Pitch Deck Upload
+        assign: [Founder names and roles]
+        description: [Business description in 2-3 sentences]
+        
+        Rules:
+        - If information is not found, write "Not mentioned"
+        - Use exact format: "field_name: value"
+        - No HTML tags, no <div>, no formatting
+        - Extract numbers with currency symbols (e.g., $2M, ₹5 Cr)
+        - Keep descriptions concise and factual
+        
+        Example output:
+        company_name: TechCorp
+        sector: Fintech
+        stage: Series A
+        ask: $2M
+        revenue: $500K ARR
+        valuation: $10M pre-money
+        source: Pitch Deck Upload
+        assign: John Doe (CEO), Jane Smith (CTO)
+        description: AI-powered financial platform for small businesses.
         """
         
         messages = [
-            SystemMessage(content="You are an expert at extracting CRM-specific structured data from pitch decks. You have analyzed thousands of pitch decks and can identify patterns, implicit information, and extract precise financial data. Focus on accuracy and completeness."),
-            HumanMessage(content=f"{extraction_prompt}\n\n{text}")
+            SystemMessage(content="You are a data extraction specialist. Return only plain text in the exact format requested. No HTML, no markdown, no additional formatting."),
+            HumanMessage(content=f"{extraction_prompt}\n\nPitch Deck Content:\n{text}")
         ]
         
         response = llm.invoke(messages)
-        return response.content
+        
+        # Clean the response to remove any HTML tags
+        clean_response = re.sub(r'<[^>]+>', '', response.content)
+        clean_response = re.sub(r'```[^`]*```', '', clean_response)  # Remove code blocks
+        clean_response = clean_response.strip()
+        
+        # Validate the response format
+        if '<div' in clean_response or '<html' in clean_response:
+            logger.warning("LLM returned HTML content, attempting to clean...")
+            # Extract text from HTML if present
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(clean_response, 'html.parser')
+            clean_response = soup.get_text()
+        
+        return clean_response
+        
     except Exception as e:
         logger.error(f"Error extracting CRM structured data: {e}")
-        return "Error extracting structured data"
-
+        return """company_name: Not mentioned
+sector: Not mentioned
+stage: Not mentioned
+ask: Not mentioned
+revenue: Not mentioned
+valuation: Not mentioned
+source: Pitch Deck Upload
+assign: Not mentioned
+description: Not mentioned"""
 def parse_crm_data(structured_text):
-    """Enhanced CRM data parser with intelligent type conversion"""
+    """Enhanced CRM data parser with better validation"""
     crm_data = {}
+    
+    # Clean the input text first
+    structured_text = re.sub(r'<[^>]+>', '', structured_text)  # Remove HTML tags
+    structured_text = re.sub(r'```[^`]*```', '', structured_text)  # Remove code blocks
+    
     lines = structured_text.split('\n')
+    
+    # Expected fields
+    expected_fields = ['company_name', 'sector', 'stage', 'ask', 'revenue', 'valuation', 'source', 'assign', 'description']
     
     for line in lines:
         line = line.strip()
@@ -232,11 +252,17 @@ def parse_crm_data(structured_text):
             key = key.strip().lower()
             value = value.strip()
             
-            if key in ['company_name', 'sector', 'stage', 'ask', 'revenue', 'valuation', 'source', 'assign', 'description']:
-                if value and value.lower() not in ["not mentioned", "not found", "n/a", ""]:
+            # Only process expected fields
+            if key in expected_fields:
+                if value and value.lower() not in ["not mentioned", "not found", "n/a", "", "null"]:
                     crm_data[key] = value
                 else:
                     crm_data[key] = ""
+    
+    # Ensure all expected fields exist
+    for field in expected_fields:
+        if field not in crm_data:
+            crm_data[field] = ""
     
     # Smart parsing for financial fields
     financial_fields = ['ask', 'revenue', 'valuation']
@@ -247,9 +273,95 @@ def parse_crm_data(structured_text):
             # Parse numerical value for CRM
             parsed_amount = parse_currency_amount(crm_data[field])
             crm_data[f"{field}_amount"] = parsed_amount
+        else:
+            crm_data[f"{field}_display"] = "Not mentioned"
+            crm_data[f"{field}_amount"] = None
     
     return crm_data
+def validate_crm_data(crm_data):
+    """Validate CRM data quality"""
+    validation_results = {
+        "valid": True,
+        "warnings": [],
+        "errors": []
+    }
+    
+    # Check for HTML remnants
+    for key, value in crm_data.items():
+        if isinstance(value, str) and ('<div' in value or '<html' in value or '&lt;' in value):
+            validation_results["errors"].append(f"HTML content detected in {key}")
+            validation_results["valid"] = False
+    
+    # Check required fields
+    required_fields = ["company_name"]
+    for field in required_fields:
+        if not crm_data.get(field) or crm_data[field] == "Not mentioned":
+            validation_results["warnings"].append(f"Missing required field: {field}")
+    
+    return validation_results
 
+# Updated file processing section
+if file:
+    with st.spinner("🔄 Processing pitch deck..."):
+        file_bytes = file.read()
+        text = extract_pdf_text(file_bytes)
+        st.session_state.parsed_doc = text
+        st.session_state.sections = split_sections(text)
+        st.session_state.file_uploaded = True
+
+    with st.spinner("🧠 Extracting CRM data with AI..."):
+        crm_structured_text = extract_crm_structured_data(text)
+        st.session_state.structured_data = crm_structured_text
+        st.session_state.crm_data = parse_crm_data(crm_structured_text)
+        
+        # Validate the extracted data
+        validation = validate_crm_data(st.session_state.crm_data)
+        
+        if not validation["valid"]:
+            st.error("⚠️ Data extraction issues detected:")
+            for error in validation["errors"]:
+                st.error(f"- {error}")
+            
+            # Show raw extraction for debugging
+            with st.expander("🔍 Debug: Raw Extraction"):
+                st.code(crm_structured_text)
+            
+            # Retry extraction with simpler prompt
+            st.warning("Retrying with simplified extraction...")
+            retry_prompt = f"""
+            Extract key information from this pitch deck in simple format:
+            
+            Company: [company name]
+            Industry: [industry/sector]
+            Stage: [funding stage]
+            Funding: [amount requested]
+            Revenue: [current revenue]
+            Value: [valuation]
+            Founders: [founder names]
+            
+            Text: {text[:5000]}
+            """
+            
+            try:
+                llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
+                retry_response = llm.invoke(retry_prompt)
+                st.info("Retry extraction:")
+                st.code(retry_response.content)
+            except Exception as e:
+                st.error(f"Retry failed: {e}")
+        
+        if validation["warnings"]:
+            for warning in validation["warnings"]:
+                st.warning(f"⚠️ {warning}")
+    
+    # Only proceed with Zoho if validation passed
+    if validation["valid"]:
+        with st.spinner("🔗 Sending to Zoho CRM..."):
+            formatted_crm_data = format_crm_data_for_zoho(st.session_state.crm_data)
+            webhook_success = send_to_zoho_webhook(formatted_crm_data)
+            display_zoho_status(webhook_success, st.session_state.crm_data)
+    
+    st.success("✅ Pitch deck processed successfully!")
 def format_crm_data_for_zoho(crm_data):
     """Enhanced CRM data formatting for Zoho with validation"""
     
