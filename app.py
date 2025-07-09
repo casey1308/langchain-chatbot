@@ -28,7 +28,7 @@ if not openai_api_key or not serpapi_key:
     st.stop()
 
 # Initialize session state
-for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "structured_data", "selected_chat_index"]:
+for key in ["chat_history", "parsed_doc", "file_uploaded", "sections", "structured_data", "selected_chat_index", "crm_data"]:
     if key not in st.session_state:
         if key == "chat_history":
             st.session_state[key] = []
@@ -104,81 +104,163 @@ def split_sections(text):
     
     return {k: "\n".join(v) for k, v in sections.items() if v}
 
-# Enhanced data extraction using LLM
-def extract_structured_data(text):
-    """Extract structured data from pitch deck using LLM"""
+# Enhanced CRM-focused data extraction
+def extract_crm_structured_data(text):
+    """Extract CRM-specific structured data from pitch deck using LLM"""
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
         
         extraction_prompt = """
-        Analyze this pitch deck text and extract the following information in key-value format.
-        Look through ALL the text carefully and extract ANY information that might be relevant.
-        Don't just look for obvious sections - information might be scattered throughout.
+        Analyze this pitch deck text and extract ONLY the following CRM-specific information in exact key-value format.
+        Look through ALL the text carefully and extract specific numbers, amounts, and concrete details.
         
-        Please provide the extracted data in this exact key-value format:
+        CRITICAL: Use these EXACT keys and provide specific values or "Not mentioned":
         
-        company_name: [Company Name or Not mentioned]
-        description: [Brief company description]
-        industry: [Industry/Sector]
-        stage: [Seed/Series A/etc or Not mentioned]
-        location: [Location if mentioned or Not mentioned]
+        company_name: [Extract exact company name]
+        valuation: [Extract current valuation with currency and amount, e.g., "$5M pre-money" or "Not mentioned"]
+        revenue: [Extract current revenue figures with specific numbers, e.g., "$500K ARR" or "Not mentioned"]
+        ask: [Extract funding amount being sought, e.g., "$2M Series A" or "Not mentioned"]
+        source: [Always put "Pitch Deck Upload"]
         
-        founder_1_name: [Full Name or Not mentioned]
-        founder_1_role: [CEO/CTO/etc or Not mentioned]
-        founder_1_background: [Background/Experience or Not mentioned]
-        founder_2_name: [Full Name or Not mentioned]
-        founder_2_role: [CEO/CTO/etc or Not mentioned]
-        founder_2_background: [Background/Experience or Not mentioned]
-        team_size: [Number if mentioned or Not mentioned]
+        ADDITIONAL CONTEXT (for analysis only):
+        industry: [Industry/sector]
+        stage: [Funding stage]
+        founder_name: [Primary founder name]
+        founder_role: [Primary founder role]
+        location: [Company location]
+        employees: [Team size/employee count]
+        customers: [Customer metrics]
+        market_size: [Addressable market size]
         
-        market_size: [Market size with specific numbers or Not mentioned]
-        problem: [Problem being solved or Not mentioned]
-        solution: [Solution provided or Not mentioned]
-        target_market: [Target market description or Not mentioned]
-        
-        product_description: [Product/service description or Not mentioned]
-        key_features: [Key features or Not mentioned]
-        technology_stack: [Technology if mentioned or Not mentioned]
-        differentiators: [What makes it unique or Not mentioned]
-        
-        revenue: [Current revenue or Not mentioned]
-        customers: [Customer count/info or Not mentioned]
-        growth: [Growth metrics or Not mentioned]
-        users: [Active users if mentioned or Not mentioned]
-        partnerships: [Key partnerships or Not mentioned]
-        
-        ask: [Amount seeking or Not mentioned]
-        valuation: [Current valuation or Not mentioned]
-        funding: [Previous funding info or Not mentioned]
-        use_of_funds: [How funds will be used or Not mentioned]
-        revenue_model: [How they make money or Not mentioned]
-        pricing: [Pricing strategy if mentioned or Not mentioned]
-        
-        competition: [Competitive landscape info if mentioned or Not mentioned]
-        go_to_market: [Marketing/sales strategy or Not mentioned]
-        timeline: [Key milestones or timeline if mentioned or Not mentioned]
-        
-        IMPORTANT: 
-        1. Look for information in ALL parts of the text, not just obvious sections
-        2. Extract specific numbers, percentages, and concrete details whenever possible
-        3. If you find partial information, include it rather than saying "Not mentioned"
-        4. Keep each value on a single line
-        5. Use the exact key format shown above
+        INSTRUCTIONS:
+        1. Extract SPECIFIC numbers and amounts wherever possible
+        2. Include currency symbols and units (K, M, B)
+        3. Look for information across ALL sections of the document
+        4. Be precise with valuation (pre-money/post-money distinction)
+        5. For ask: include round type if mentioned (Seed, Series A, etc.)
+        6. For revenue: include type if mentioned (ARR, MRR, total revenue)
+        7. Source should always be "Pitch Deck Upload"
         
         Text to analyze:
         """
         
         messages = [
-            SystemMessage(content="You are an expert at extracting structured data from pitch decks. Be thorough and look for information throughout the entire document. Extract specific numbers and details whenever possible. Format the output EXACTLY as requested with key-value pairs."),
-            HumanMessage(content=f"{extraction_prompt}\n\n{text[:6000]}")
+            SystemMessage(content="You are an expert at extracting CRM-specific structured data from pitch decks. Focus on extracting exact numbers, amounts, and concrete details. Be thorough and look for information throughout the entire document."),
+            HumanMessage(content=f"{extraction_prompt}\n\n{text}")
         ]
         
         response = llm.invoke(messages)
         return response.content
         
     except Exception as e:
-        logger.error(f"Error extracting structured data: {e}")
+        logger.error(f"Error extracting CRM structured data: {e}")
         return "Error extracting structured data"
+
+# Enhanced comprehensive analysis
+def extract_comprehensive_analysis(text):
+    """Extract comprehensive analysis for deep insights"""
+    try:
+        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.1)
+        
+        analysis_prompt = """
+        Conduct a COMPREHENSIVE VC analysis of this pitch deck. Provide detailed insights in the following structure:
+        
+        ## EXECUTIVE SUMMARY
+        - One-paragraph overview of the investment opportunity
+        - Key strengths and concerns
+        - Overall recommendation (Strong/Moderate/Weak investment case)
+        
+        ## COMPANY OVERVIEW
+        - Business model and value proposition
+        - Stage of company and maturity
+        - Competitive positioning
+        
+        ## FOUNDERS & TEAM ANALYSIS
+        - Founder backgrounds and relevant experience
+        - Team composition and key gaps
+        - Leadership assessment
+        
+        ## MARKET OPPORTUNITY
+        - Market size and growth potential (TAM/SAM/SOM)
+        - Market timing and trends
+        - Competitive landscape analysis
+        
+        ## PRODUCT & TECHNOLOGY
+        - Product differentiation and unique value prop
+        - Technology stack and IP considerations
+        - Product-market fit evidence
+        
+        ## TRACTION & METRICS
+        - Revenue metrics and growth trajectory
+        - Customer acquisition and retention
+        - Key performance indicators
+        - Milestone achievements
+        
+        ## FINANCIAL ANALYSIS
+        - Revenue model and pricing strategy
+        - Unit economics and scalability
+        - Funding history and use of funds
+        - Financial projections assessment
+        
+        ## INVESTMENT DETAILS
+        - Funding ask and valuation analysis
+        - Deal terms and structure
+        - Use of funds breakdown
+        - Exit strategy considerations
+        
+        ## RISK ASSESSMENT
+        - Market risks and competitive threats
+        - Execution risks and team capabilities
+        - Financial and scalability risks
+        - Regulatory and compliance considerations
+        
+        ## RECOMMENDATIONS
+        - Due diligence areas to focus on
+        - Key questions for management
+        - Suggested next steps
+        
+        IMPORTANT: 
+        - Be specific and cite exact information from the deck
+        - Highlight missing information that should be obtained
+        - Provide actionable insights for investment decision
+        - Use bullet points for readability
+        - Include specific numbers, percentages, and metrics
+        
+        Pitch Deck Content:
+        """
+        
+        messages = [
+            SystemMessage(content="You are a senior VC analyst conducting comprehensive due diligence. Provide detailed, actionable insights that will help make investment decisions. Be thorough, specific, and highlight both opportunities and risks."),
+            HumanMessage(content=f"{analysis_prompt}\n\n{text}")
+        ]
+        
+        response = llm.invoke(messages)
+        return response.content
+        
+    except Exception as e:
+        logger.error(f"Error generating comprehensive analysis: {e}")
+        return "Error generating comprehensive analysis"
+
+# Parse CRM data into structured format
+def parse_crm_data(structured_text):
+    """Parse the structured text into a dictionary for CRM integration"""
+    crm_data = {}
+    lines = structured_text.split('\n')
+    
+    for line in lines:
+        line = line.strip()
+        if ':' in line:
+            key, value = line.split(':', 1)
+            key = key.strip().lower()
+            value = value.strip()
+            
+            # Map to CRM fields
+            if key in ['company_name', 'valuation', 'revenue', 'ask', 'source']:
+                crm_data[key] = value if value and value != "Not mentioned" else ""
+            elif key in ['industry', 'stage', 'founder_name', 'founder_role', 'location', 'employees', 'customers', 'market_size']:
+                crm_data[key] = value if value and value != "Not mentioned" else ""
+    
+    return crm_data
 
 # Enhanced section matching
 def match_section(key, sections, structured_data=None):
@@ -239,7 +321,7 @@ def search_serpapi(query):
             "engine": "google",
             "q": query,
             "api_key": serpapi_key,
-            "num": 5  # Increased from 3 to get more results
+            "num": 5
         }
         r = requests.get("https://serpapi.com/search", params=params)
         if r.status_code == 200:
@@ -254,13 +336,11 @@ def search_serpapi(query):
                 link = res.get("link", "")
                 combined += f"Title: {title}\nSnippet: {snippet}\nSource: {link}\n\n"
             
-            # Also check for people_also_ask results for founder queries
             if "people_also_ask" in data:
                 combined += "\n--- Related Questions ---\n"
-                for paa in data["people_also_ask"][:3]:  # Top 3 related questions
+                for paa in data["people_also_ask"][:3]:
                     combined += f"Q: {paa.get('question', '')}\nA: {paa.get('snippet', '')}\n\n"
             
-            # Check for knowledge graph results (good for person info)
             if "knowledge_graph" in data:
                 kg = data["knowledge_graph"]
                 combined += "\n--- Knowledge Graph ---\n"
@@ -275,7 +355,6 @@ def search_serpapi(query):
             
             llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
             
-            # Enhanced prompt for founder/background searches
             if any(x in query.lower() for x in ["founder", "background", "education", "experience", "linkedin", "profile"]):
                 search_prompt = f"""Analyze these search results and provide a comprehensive summary focusing on:
                 1. Educational background (universities, degrees, graduation years)
@@ -314,38 +393,29 @@ with st.sidebar:
         st.write(f"Total sections: {len(st.session_state.sections)}")
         st.write(f"Total text length: {len(st.session_state.parsed_doc)} chars")
     
-    # Show structured data with expandable view
-    if st.session_state.structured_data:
-        st.header("🔍 Extracted Data")
+    # Show CRM data
+    if st.session_state.crm_data:
+        st.header("🔗 CRM Integration Data")
         
-        # Parse and display key-value pairs in expandable format
-        with st.expander("View Key-Value Data", expanded=False):
-            if st.session_state.structured_data:
-                lines = st.session_state.structured_data.split('\n')
-                for line in lines:
-                    line = line.strip()
-                    if ':' in line and line:
-                        key, value = line.split(':', 1)
-                        key = key.strip()
-                        value = value.strip()
-                        if value and value != "Not mentioned":
-                            st.write(f"**{key}:** {value}")
+        # Display key CRM fields
+        crm_fields = ['company_name', 'valuation', 'revenue', 'ask', 'source']
+        for field in crm_fields:
+            if field in st.session_state.crm_data and st.session_state.crm_data[field]:
+                st.write(f"**{field.replace('_', ' ').title()}:** {st.session_state.crm_data[field]}")
         
-        # Button to view full structured data
-        if st.button("📄 View Full Structured Analysis"):
-            st.session_state.show_structured_data = True
+        # Export CRM data button
+        if st.button("📤 Export CRM Data"):
+            st.json(st.session_state.crm_data)
     
     # Chat History in Sidebar
     if st.session_state.chat_history:
         st.header("💬 Chat History")
         
-        # Add clear chat button
         if st.button("🗑️ Clear Chat History"):
             st.session_state.chat_history = []
             st.session_state.selected_chat_index = None
             st.rerun()
         
-        # Display chat history in reverse order (newest first)
         for i, (user, bot, timestamp) in enumerate(reversed(st.session_state.chat_history)):
             chat_index = len(st.session_state.chat_history) - 1 - i
             if st.button(f"Q{chat_index + 1}: {user[:30]}...", key=f"chat_{chat_index}"):
@@ -354,68 +424,69 @@ with st.sidebar:
 
 # Main content area
 
-# Show full structured data if requested
-if hasattr(st.session_state, 'show_structured_data') and st.session_state.show_structured_data:
-    st.header("🔍 Complete Structured Analysis")
+# Show comprehensive analysis if available
+if st.session_state.structured_data:
+    col1, col2 = st.columns(2)
     
-    # Display as formatted key-value pairs
-    if st.session_state.structured_data:
-        lines = st.session_state.structured_data.split('\n')
-        
-        # Group by categories
-        current_category = "General"
-        categories = {
-            "company": "🏢 Company Information",
-            "founder": "👥 Founders & Team", 
-            "market": "📊 Market & Problem",
-            "product": "🚀 Product & Technology",
-            "revenue": "💰 Traction & Metrics",
-            "customers": "💰 Traction & Metrics",
-            "growth": "💰 Traction & Metrics",
-            "users": "💰 Traction & Metrics",
-            "partnerships": "💰 Traction & Metrics",
-            "ask": "💵 Funding & Financials",
-            "valuation": "💵 Funding & Financials",
-            "funding": "💵 Funding & Financials",
-            "use_of_funds": "💵 Funding & Financials",
-            "revenue_model": "💵 Funding & Financials",
-            "pricing": "💵 Funding & Financials",
-            "competition": "⚔️ Competition & Strategy",
-            "go_to_market": "⚔️ Competition & Strategy",
-            "timeline": "⚔️ Competition & Strategy"
-        }
-        
-        grouped_data = {}
-        for line in lines:
-            line = line.strip()
-            if ':' in line and line:
-                key, value = line.split(':', 1)
-                key = key.strip().lower()
-                value = value.strip()
-                
-                # Find category
-                category = "🔍 Other Information"
-                for cat_key, cat_name in categories.items():
-                    if cat_key in key:
-                        category = cat_name
-                        break
-                
-                if category not in grouped_data:
-                    grouped_data[category] = []
-                
-                if value and value != "Not mentioned":
-                    grouped_data[category].append((key.replace('_', ' ').title(), value))
-        
-        # Display grouped data
-        for category, items in grouped_data.items():
-            if items:
-                st.subheader(category)
-                for key, value in items:
-                    st.write(f"**{key}:** {value}")
-                st.markdown("---")
+    with col1:
+        if st.button("🔍 View Comprehensive Analysis"):
+            st.session_state.show_comprehensive_analysis = True
     
-    if st.button("❌ Close"):
-        st.session_state.show_structured_data = False
+    with col2:
+        if st.button("📊 View CRM Data Summary"):
+            st.session_state.show_crm_summary = True
+
+# Show comprehensive analysis
+if hasattr(st.session_state, 'show_comprehensive_analysis') and st.session_state.show_comprehensive_analysis:
+    st.header("🔍 Comprehensive VC Analysis")
+    
+    if not hasattr(st.session_state, 'comprehensive_analysis'):
+        with st.spinner("🔄 Generating comprehensive analysis..."):
+            st.session_state.comprehensive_analysis = extract_comprehensive_analysis(st.session_state.parsed_doc)
+    
+    st.markdown(st.session_state.comprehensive_analysis)
+    
+    if st.button("❌ Close Analysis"):
+        st.session_state.show_comprehensive_analysis = False
+        st.rerun()
+    st.markdown("---")
+
+# Show CRM summary
+if hasattr(st.session_state, 'show_crm_summary') and st.session_state.show_crm_summary:
+    st.header("📊 CRM Data Summary")
+    
+    if st.session_state.crm_data:
+        # Primary CRM fields
+        st.subheader("🔑 Primary CRM Fields")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Company", st.session_state.crm_data.get('company_name', 'Not specified'))
+            st.metric("Valuation", st.session_state.crm_data.get('valuation', 'Not specified'))
+            st.metric("Revenue", st.session_state.crm_data.get('revenue', 'Not specified'))
+        
+        with col2:
+            st.metric("Funding Ask", st.session_state.crm_data.get('ask', 'Not specified'))
+            st.metric("Source", st.session_state.crm_data.get('source', 'Not specified'))
+        
+        # Additional context
+        st.subheader("📋 Additional Context")
+        additional_fields = ['industry', 'stage', 'founder_name', 'founder_role', 'location', 'employees', 'customers', 'market_size']
+        
+        for field in additional_fields:
+            if field in st.session_state.crm_data and st.session_state.crm_data[field]:
+                st.write(f"**{field.replace('_', ' ').title()}:** {st.session_state.crm_data[field]}")
+        
+        # JSON export
+        st.subheader("📤 Export Data")
+        st.json(st.session_state.crm_data)
+        
+        # Copy to clipboard button
+        if st.button("📋 Copy JSON to Clipboard"):
+            st.code(json.dumps(st.session_state.crm_data, indent=2))
+    
+    if st.button("❌ Close CRM Summary"):
+        st.session_state.show_crm_summary = False
         st.rerun()
     st.markdown("---")
 
@@ -447,149 +518,141 @@ if file:
         st.session_state.sections = split_sections(text)
         st.session_state.file_uploaded = True
         
-        # Extract structured data
-        with st.spinner("🔍 Extracting structured data..."):
-            st.session_state.structured_data = extract_structured_data(text)
+        # Extract CRM-specific structured data
+        with st.spinner("🔍 Extracting CRM data..."):
+            crm_structured_text = extract_crm_structured_data(text)
+            st.session_state.structured_data = crm_structured_text
+            st.session_state.crm_data = parse_crm_data(crm_structured_text)
         
-    st.success("✅ Pitch deck parsed and analyzed!")
+    st.success("✅ Pitch deck parsed and CRM data extracted!")
+    
+    # Show CRM data preview
+    if st.session_state.crm_data:
+        st.subheader("🔗 CRM Data Preview")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Company", st.session_state.crm_data.get('company_name', 'Not found')[:20] + "..." if len(st.session_state.crm_data.get('company_name', '')) > 20 else st.session_state.crm_data.get('company_name', 'Not found'))
+        
+        with col2:
+            st.metric("Valuation", st.session_state.crm_data.get('valuation', 'Not found'))
+        
+        with col3:
+            st.metric("Ask", st.session_state.crm_data.get('ask', 'Not found'))
 
 # Show selected section
 if hasattr(st.session_state, 'selected_section') and st.session_state.selected_section:
     st.subheader(f"📖 {st.session_state.selected_section}")
     st.text_area("Content", st.session_state.sections[st.session_state.selected_section], height=200)
 
-# Prompt input
+# Enhanced prompt input
 st.markdown("### 💬 Ask Questions")
-st.markdown("**Example queries:**")
-st.markdown("- `Tell me about the founders' background and education`")
-st.markdown("- `Search for founder's LinkedIn profile and experience`")
-st.markdown("- `What is the founder's educational background?`")
-st.markdown("- `Evaluate the complete pitch deck`")
-st.markdown("- `What are the funding details?`")
+st.markdown("**Quick Actions:**")
+col1, col2, col3 = st.columns(3)
 
-user_query = st.chat_input("💬 Ask about founders, funding, valuation, team, etc.")
+with col1:
+    if st.button("📊 Full Analysis"):
+        st.session_state.auto_query = "Provide a comprehensive analysis of this pitch deck"
+
+with col2:
+    if st.button("👥 Founder Analysis"):
+        st.session_state.auto_query = "Analyze the founders' backgrounds, experience, and team composition"
+
+with col3:
+    if st.button("💰 Financial Analysis"):
+        st.session_state.auto_query = "Analyze the financial aspects including valuation, revenue, and funding ask"
+
+st.markdown("**Example queries:**")
+st.markdown("- `Provide a comprehensive VC analysis of this pitch deck`")
+st.markdown("- `What are the key risks and opportunities?`")
+st.markdown("- `Analyze the competitive landscape and market opportunity`")
+st.markdown("- `What due diligence questions should I ask?`")
+
+# Handle auto queries
+if hasattr(st.session_state, 'auto_query') and st.session_state.auto_query:
+    user_query = st.session_state.auto_query
+    st.session_state.auto_query = None
+else:
+    user_query = st.chat_input("💬 Ask about the pitch deck...")
 
 if user_query:
     # Clear any selected chat when asking new question
     st.session_state.selected_chat_index = None
     
-    with st.spinner("🤖 Thinking..."):
+    with st.spinner("🤖 Analyzing..."):
         try:
             context = st.session_state.parsed_doc or ""
             llm = ChatOpenAI(
                 model="gpt-4o", 
                 openai_api_key=openai_api_key, 
                 streaming=True,
-                temperature=0.2,  # Lower temperature for more factual responses
-                max_tokens=1500
+                temperature=0.1,  # Lower temperature for more analytical responses
+                max_tokens=2000
             )
             
             lower_q = user_query.lower()
 
-            # Enhanced intent matching
+            # Enhanced intent matching for deeper analysis
             intent_keys = {
-                "founder": ["founder", "who is the founder", "co-founder", "ceo", "team leader", "management"],
-                "team": ["team", "leadership", "management", "staff", "employees"],
-                "valuation": ["valuation", "company worth", "value", "pre-money", "post-money"],
-                "ask": ["ask", "funding ask", "how much funding", "raise", "investment needed"],
-                "round": ["previous round", "funding round", "series a", "seed", "pre-seed"],
-                "investor": ["investors", "vc", "backers", "existing investors", "previous investors"],
-                "market": ["market", "market size", "tam", "opportunity"],
-                "problem": ["problem", "pain point", "challenge"],
-                "solution": ["solution", "product", "technology"],
-                "traction": ["traction", "revenue", "customers", "growth"],
-                "competition": ["competition", "competitors", "competitive"]
+                "comprehensive": ["comprehensive", "full analysis", "complete analysis", "overall", "summary", "evaluate", "assessment"],
+                "founder": ["founder", "team", "leadership", "management", "background", "experience"],
+                "financial": ["financial", "valuation", "revenue", "funding", "ask", "investment", "money"],
+                "market": ["market", "competition", "competitive", "industry", "opportunity"],
+                "product": ["product", "technology", "solution", "features"],
+                "traction": ["traction", "metrics", "growth", "customers", "users"],
+                "risks": ["risks", "challenges", "concerns", "red flags", "weaknesses"],
+                "due_diligence": ["due diligence", "questions", "investigation", "research"]
             }
 
-            # Check for evaluation/analysis keywords
-            evaluation_keywords = ["evaluate", "analysis", "analyze", "review", "assessment", "overall", "summary", "complete analysis"]
-            is_evaluation = any(keyword in lower_q for keyword in evaluation_keywords)
-
-            matched_key = next((k for k, v in intent_keys.items() if any(q in lower_q for q in v)), None)
-
-            if is_evaluation:
-                # For evaluation queries, provide comprehensive context with all sections
-                all_sections_text = ""
-                for section_name, section_content in st.session_state.sections.items():
-                    all_sections_text += f"\n=== {section_name.upper()} ===\n{section_content}\n"
+            # Check for comprehensive analysis
+            is_comprehensive = any(keyword in lower_q for keyword in intent_keys.get("comprehensive", []))
+            
+            if is_comprehensive:
+                # Generate comprehensive analysis if not already done
+                if not hasattr(st.session_state, 'comprehensive_analysis'):
+                    st.session_state.comprehensive_analysis = extract_comprehensive_analysis(context)
                 
-                context_msg = f"FULL PITCH DECK CONTENT:\n{all_sections_text}\n\nSTRUCTURED DATA ANALYSIS:\n{st.session_state.structured_data}\n\nORIGINAL DOCUMENT:\n{context[:1000]}"
-            elif matched_key:
-                section_text = match_section(matched_key, st.session_state.sections, st.session_state.structured_data)
-                
-                # Check if we should search for additional info
-                should_search = (
-                    section_text == "Not mentioned in deck." or
-                    (matched_key in ["founder", "team"] and any(x in lower_q for x in ["background", "education", "experience", "linkedin", "profile", "bio", "career", "history"])) or
-                    any(x in lower_q for x in ["search", "find", "look up", "research", "web search", "google"])
-                )
-                
-                if should_search:
-                    # Extract founder names and company name from structured data for better search
-                    founder_names = []
-                    company_name = ""
-                    
-                    if st.session_state.structured_data:
-                        try:
-                            # Parse the key-value structured data
-                            lines = st.session_state.structured_data.split('\n')
-                            for line in lines:
-                                line = line.strip()
-                                if ':' in line:
-                                    key, value = line.split(':', 1)
-                                    key = key.strip().lower()
-                                    value = value.strip()
-                                    
-                                    if 'founder' in key and 'name' in key and value and value != "Not mentioned":
-                                        founder_names.append(value)
-                                    elif key == 'company_name' and value and value != "Not mentioned":
-                                        company_name = value
-                        except:
-                            # Fallback extraction
-                            if "Himanshu Gupta" in st.session_state.structured_data:
-                                founder_names.append("Himanshu Gupta")
-                    
-                    # Create better search query with company context
-                    if founder_names and matched_key in ["founder", "team"]:
-                        if company_name:
-                            # Search with founder name + company name for more specific results
-                            search_query = f'"{founder_names[0]}" "{company_name}" founder CEO linkedin background education'
-                        else:
-                            # Search with just founder name + founder context
-                            search_query = f'"{founder_names[0]}" founder linkedin background education experience'
-                    else:
-                        search_query = user_query
-                    
-                    web_result = search_serpapi(search_query)
-                    context_msg = f"Deck Analysis: {section_text}\n\nWeb Search Results for '{search_query}':\n{web_result}"
-                else:
-                    # Include structured data context
-                    context_msg = f"Deck Section ({matched_key}):\n{section_text}\n\nStructured Data:\n{st.session_state.structured_data[:1000]}"
-            elif any(x in lower_q for x in ["lawsuit", "legal", "controversy", "reputation", "news", "background", "education", "linkedin", "profile", "search", "find", "look up", "research", "web search", "google"]):
-                web_result = search_serpapi(user_query)
-                context_msg = f"Deck Context:\n{context[:1000]}\n\nWeb Research:\n{web_result}"
+                context_msg = f"COMPREHENSIVE ANALYSIS:\n{st.session_state.comprehensive_analysis}\n\nCRM DATA:\n{st.session_state.structured_data}\n\nFULL DOCUMENT:\n{context[:2000]}"
             else:
-                context_msg = f"Full Deck Analysis:\n{context[:2500]}\n\nStructured Data:\n{st.session_state.structured_data[:1000]}"
+                # Find matching intent
+                matched_intent = None
+                for intent, keywords in intent_keys.items():
+                    if any(keyword in lower_q for keyword in keywords):
+                        matched_intent = intent
+                        break
+                
+                if matched_intent:
+                    section_text = match_section(matched_intent, st.session_state.sections, st.session_state.structured_data)
+                    context_msg = f"FOCUSED ANALYSIS ({matched_intent}):\n{section_text}\n\nCRM DATA:\n{st.session_state.structured_data}\n\nFULL CONTEXT:\n{context[:2000]}"
+                else:
+                    context_msg = f"FULL ANALYSIS:\n{context[:3000]}\n\nCRM DATA:\n{st.session_state.structured_data}"
 
-            # Enhanced system message
-            system_msg = """You are an expert VC analyst AI. Analyze pitch decks thoroughly and provide detailed, actionable insights.
+            # Enhanced system message for deeper analysis
+            system_msg = """You are a senior VC analyst with 15+ years of experience. Provide DEEP, actionable insights for investment decisions.
 
-            Guidelines:
+            Analysis Guidelines:
             1. Be specific and cite exact information from the deck
-            2. If information is missing, clearly state what's not mentioned
-            3. For founders: Look for names, roles, backgrounds, experience, LinkedIn profiles
-            4. For financials: Look for specific numbers, percentages, timelines
-            5. Provide VC-relevant insights and red flags
-            6. If web search was used, distinguish between deck info and external research
-            7. When doing a full evaluation/analysis, systematically go through each section provided
-            8. Use the structured data analysis to cross-reference information
-            9. Look for information across ALL sections, not just the most obvious ones
-            10. If doing a comprehensive analysis, organize findings by: Company, Founders, Market, Product/Solution, Traction, Financials, and Investment Details
+            2. Provide concrete numbers, metrics, and percentages
+            3. Highlight missing critical information
+            4. Identify red flags and investment risks
+            5. Suggest specific due diligence questions
+            6. Compare against industry benchmarks when relevant
+            7. Provide clear investment recommendation rationale
+            8. Focus on scalability and market opportunity assessment
+            9. Analyze team capability for execution
+            10. Evaluate competitive moat and differentiation
+            
+            Response Format:
+            - Use clear headers and bullet points
+            - Include specific actionable insights
+            - Highlight key metrics and financial data
+            - Provide both opportunities and risks
+            - End with specific next steps or questions
             """
 
             messages = [
                 SystemMessage(content=system_msg),
-                HumanMessage(content=f"{context_msg}\n\nVC Question: {user_query}")
+                HumanMessage(content=f"{context_msg}\n\nVC Analysis Request: {user_query}")
             ]
 
             # Display the conversation
@@ -616,24 +679,12 @@ if user_query:
 
         except RateLimitError:
             st.error("❌ Rate limit exceeded. Please try again in a minute.")
-            full_response = "Rate limit exceeded."
         except APIError as e:
             st.error(f"❌ OpenAI API error: {str(e)}")
-            full_response = f"API error: {str(e)}"
         except Exception as e:
             st.error(f"❌ Unexpected error: {str(e)}")
-            logger.error(f"Streaming error: {str(e)}", exc_info=True)
-            
-            # Fallback to non-streaming
-            try:
-                response = llm.invoke(messages)
-                full_response = response.content
-                st.markdown(full_response)
-                
-                # Store in chat history
-                st.session_state.chat_history.append(
-                    (user_query, full_response.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-                )
-            except Exception as fallback_e:
-                st.error(f"❌ Fallback also failed: {str(fallback_e)}")
-                full_response = "Error generating response."
+            logger.error(f"Analysis error: {str(e)}", exc_info=True)
+
+# Footer
+st.markdown("---")
+st.markdown("**💡 Pro Tip:** Use the CRM data export feature to integrate directly with your Zoho CRM dealflow module.")
