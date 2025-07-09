@@ -10,15 +10,15 @@ from difflib import get_close_matches
 import PyPDF2
 
 from langchain_openai import ChatOpenAI
-from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
+from langchain.callbacks.streamlit import StreamlitCallbackHandler
 
 # Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
-tavily_api_key = os.getenv("TAVILY_API_KEY")
+serpapi_key = os.getenv("SERPAPI_API_KEY")
 
-if not openai_api_key:
-    st.error("❌ OPENAI_API_KEY is missing in your .env file.")
+if not openai_api_key or not serpapi_key:
+    st.error("❌ Add your OPENAI_API_KEY and SERPAPI_API_KEY in .env")
     st.stop()
 
 # Initialize session state
@@ -26,23 +26,23 @@ for key in ["chat_history", "parsed_doc", "file_uploaded", "sections"]:
     if key not in st.session_state:
         st.session_state[key] = [] if key == "chat_history" else (False if key == "file_uploaded" else None)
 
-# Clean text
+# Clean PDF text
 def clean_text(text):
     text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
     return re.sub(r"\n{2,}", "\n", text).strip()
 
-# Extract text from PDF
 def extract_pdf_text(file_bytes):
     reader = PyPDF2.PdfReader(BytesIO(file_bytes))
     return clean_text("\n".join(page.extract_text() or "" for page in reader.pages))
 
-# Split by rough headings
+# Sectioning logic
 def split_sections(text):
     sections, current = {}, "General"
     headings = [
         "summary", "objective", "education", "experience", "projects", "skills",
         "market", "team", "business model", "financials", "revenue", "traction",
-        "competition", "go-to-market", "ask", "funding", "valuation", "round", "investors", "series", "cap table", "founder"
+        "competition", "go-to-market", "ask", "funding", "valuation", "round",
+        "investors", "series", "cap table", "founder"
     ]
     for line in text.splitlines():
         l = line.strip()
@@ -68,100 +68,69 @@ def match_section(key, sections):
                     return sections[section_key]
         return "Not mentioned."
     else:
-        matches = get_close_matches(key.lower(), [k.lower() for k in sections.keys()], n=1, cutoff=0.4)
+        matches = get_close_matches(key, [k.lower() for k in sections.keys()], n=1, cutoff=0.4)
         if matches:
             for k in sections:
                 if k.lower() == matches[0]:
                     return sections[k]
-        return "Not mentioned."
+    return "Not mentioned."
 
-# Scoring logic
-def evaluate_pitch_table(sections):
-    criteria = [
-        ("Problem Statement", "High"), ("Offered Solution", "Medium"), ("Market Size", "Low"),
-        ("Founder Background", "High"), ("Business Model", "High"), ("Stage of the Business", "Medium"),
-        ("Revenue Model", "Medium"), ("Tech Integration", "High"), ("Traction", "Medium"),
-        ("Team Dynamics", "High"), ("Team Size", "Low"), ("Cap Table", "High"),
-        ("Competitive Landscape", "High"), ("Additional Investment Requirement", "High"),
-        ("Valuation", "Medium"), ("Regulatory Impact", "Low"), ("Exit Opportunity", "Low")
-    ]
-
-    weight_map = {"High": 0.08, "Medium": 0.05, "Low": 0.03}
-    prompt = (
-        "You are a VC analyst AI.\nEvaluate the startup based on the following pitch content.\n\n"
-        "Respond only in this markdown format:\n"
-        "| Criterion | Score (/5) | Weightage | Weighted Score | Remarks | Suggestions |\n"
-        "|-----------|-------------|-----------|----------------|---------|-------------|\n"
-    )
-
-    for label, priority in criteria:
-        weight = weight_map[priority]
-        text = match_section(label, sections)
-        prompt += f"\n## {label} (Priority: {priority}, Weightage: {weight})\n{text}\n"
-
-    prompt += (
-        "\nThen compute:\n"
-        "- Final Weighted Score = sum of (score × weightage)\n"
-        "- Verdict:\n"
-        "  - ✅ Consider: score ≥ 3.0\n"
-        "  - ⚠️ Second Opinion: 2.25 – 2.99\n"
-        "  - ❌ Pass: score < 2.25\n"
-        "- List follow-up documents in bullet points.\n"
-    )
-
+# Google SERP API Search
+def search_serpapi(query):
     try:
-        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-        return llm.invoke(prompt).content.strip()
+        params = {
+            "engine": "google",
+            "q": query,
+            "api_key": serpapi_key,
+            "num": 3
+        }
+        r = requests.get("https://serpapi.com/search", params=params)
+        if r.status_code == 200:
+            data = r.json()
+            if "organic_results" not in data:
+                return "No search results found."
+
+            combined = ""
+            for res in data["organic_results"]:
+                title = res.get("title", "")
+                snippet = res.get("snippet", "")
+                combined += f"{title}\n{snippet}\n\n"
+            llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
+            return llm.invoke(f"Summarize for a VC:\n{combined}").content.strip()
+        return f"❌ SERP API error: {r.status_code}"
     except Exception as e:
-        return f"⚠️ Evaluation failed: {str(e)}"
+        return f"❌ Web search failed: {str(e)}"
 
-# Web search (fallback only)
-def search_web(query):
-    try:
-        wrapper = TavilySearchAPIWrapper(tavily_api_key=tavily_api_key)
-        return wrapper.run(query)
-    except:
-        try:
-            headers = {"Authorization": f"Bearer {tavily_api_key}"}
-            payload = {"query": query, "max_results": 3}
-            r = requests.get("https://api.tavily.com/search", headers=headers, params=payload)
-            if r.status_code == 200:
-                results = r.json().get("results", [])
-                if not results:
-                    return "🔍 No results found."
-                combined = "\n\n".join(f"{r['title']}\n{clean_text(r['content'][:700])}" for r in results if r.get("content"))
-                llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-                return llm.invoke(f"Summarize from a VC perspective:\n{combined}").content.strip()
-            return f"🌐 Web search failed: {r.status_code} {r.reason}"
-        except Exception as e:
-            return f"🌐 Web search failed: {e}"
-
-# Streamlit UI
+# Streamlit app
 st.set_page_config(page_title="Manna — VC Evaluator", page_icon="📊")
 st.title("📊 Manna — VC Pitch Evaluator")
 
 file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
 
 if file:
-    with st.spinner("🔍 Parsing pitch deck..."):
+    with st.spinner("📄 Parsing pitch deck..."):
         file_bytes = file.read()
         text = extract_pdf_text(file_bytes)
         st.session_state.parsed_doc = text
         st.session_state.sections = split_sections(text)
         st.session_state.file_uploaded = True
-    st.success("✅ File parsed successfully!")
+    st.success("✅ Pitch deck parsed!")
 
-user_query = st.chat_input("💬 Ask anything about the startup or search the web")
+# Input
+user_query = st.chat_input("💬 Ask about the startup, funding, team, legal issues, etc.")
 
 if user_query:
     with st.spinner("🤖 Thinking..."):
         context = st.session_state.parsed_doc or ""
-        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
+        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, streaming=True)
+        stream_handler = StreamlitCallbackHandler(st.container())
         lower_q = user_query.lower()
 
         direct_keys = {
-            "founder": ["founder"], "valuation": ["valuation"],
-            "ask": ["ask", "funding required"], "round": ["round", "series"],
+            "founder": ["founder", "ceo"],
+            "valuation": ["valuation"],
+            "ask": ["ask", "funding required"],
+            "round": ["round", "series"],
             "investor": ["investors", "vc", "backers"]
         }
 
@@ -170,22 +139,23 @@ if user_query:
         if matched_key:
             section_text = match_section(matched_key, st.session_state.sections)
             if section_text == "Not mentioned.":
-                web_result = search_web(user_query)
-                prompt = f"Deck didn't include this info. Here's what I found online:\n{web_result}\n\nAnswer: {user_query}"
-                answer = llm.invoke(prompt).content.strip()
+                serp_result = search_serpapi(user_query)
+                prompt = f"Deck didn't include this info. Here's what I found online:\n{serp_result}\n\nAnswer: {user_query}"
             else:
-                answer = section_text
+                prompt = f"{section_text}\n\nAnswer this: {user_query}"
         elif any(x in lower_q for x in ["lawsuit", "legal", "controversy", "reputation"]):
-            web_result = search_web(user_query)
-            prompt = f"Document Context:\n{context[:1500]}\n\nWeb Results:\n{web_result}\n\nQuestion:\n{user_query}"
-            answer = llm.invoke(prompt).content.strip()
+            serp_result = search_serpapi(user_query)
+            prompt = f"Document Context:\n{context[:1500]}\n\nWeb Results:\n{serp_result}\n\nAnswer this:\n{user_query}"
         else:
             prompt = f"Context:\n{context[:3000]}\n\nQuestion:\n{user_query}"
-            answer = llm.invoke(prompt).content.strip()
 
-        st.session_state.chat_history.append((user_query, answer, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        with st.container():
+            st.markdown(f"**🧑 You:** {user_query}")
+            st.markdown("**🤖 Manna:**")
+            response = llm.invoke(prompt, callbacks=[stream_handler])
+            st.session_state.chat_history.append((user_query, response.content.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
-# Display chat history
+# Display full chat
 for user, bot, timestamp in st.session_state.chat_history:
     st.markdown(f"**🧑 You:** {user}")
     st.markdown(f"**🤖 Manna:**\n{bot}")
