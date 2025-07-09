@@ -7,10 +7,15 @@ from dotenv import load_dotenv
 from datetime import datetime
 from difflib import get_close_matches
 import PyPDF2
+import logging
+from openai import OpenAIError, RateLimitError, APIError
 
 from langchain_openai import ChatOpenAI
-from langchain.callbacks.streamlit import StreamlitCallbackHandler
 from langchain_core.messages import HumanMessage, SystemMessage
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -124,52 +129,81 @@ user_query = st.chat_input("💬 Ask about founders, funding, valuation, team, e
 
 if user_query:
     with st.spinner("🤖 Thinking..."):
-        context = st.session_state.parsed_doc or ""
-        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, streaming=True)
-        stream_handler = StreamlitCallbackHandler(st.container())
-        lower_q = user_query.lower()
+        try:
+            context = st.session_state.parsed_doc or ""
+            llm = ChatOpenAI(
+                model="gpt-4o", 
+                openai_api_key=openai_api_key, 
+                streaming=True,
+                temperature=0.7,
+                max_tokens=1500
+            )
+            
+            lower_q = user_query.lower()
 
-        # Intents for structured section queries
-        intent_keys = {
-            "founder": ["founder", "who is the founder", "co-founder"],
-            "team": ["team", "leadership"],
-            "valuation": ["valuation", "company worth"],
-            "ask": ["ask", "funding ask", "how much funding"],
-            "round": ["previous round", "funding round", "series a", "seed"],
-            "investor": ["investors", "vc", "backers", "existing investors"]
-        }
+            # Intents for structured section queries
+            intent_keys = {
+                "founder": ["founder", "who is the founder", "co-founder"],
+                "team": ["team", "leadership"],
+                "valuation": ["valuation", "company worth"],
+                "ask": ["ask", "funding ask", "how much funding"],
+                "round": ["previous round", "funding round", "series a", "seed"],
+                "investor": ["investors", "vc", "backers", "existing investors"]
+            }
 
-        matched_key = next((k for k, v in intent_keys.items() if any(q in lower_q for q in v)), None)
+            matched_key = next((k for k, v in intent_keys.items() if any(q in lower_q for q in v)), None)
 
-        if matched_key:
-            section_text = match_section(matched_key, st.session_state.sections)
-            if section_text == "Not mentioned in deck.":
+            if matched_key:
+                section_text = match_section(matched_key, st.session_state.sections)
+                if section_text == "Not mentioned in deck.":
+                    web_result = search_serpapi(user_query)
+                    context_msg = f"Deck didn't include this info. Here's what I found online:\n{web_result}"
+                else:
+                    context_msg = f"Deck Section:\n{section_text}"
+            elif any(x in lower_q for x in ["lawsuit", "legal", "controversy", "reputation"]):
                 web_result = search_serpapi(user_query)
-                context_msg = f"Deck didn't include this info. Here's what I found online:\n{web_result}"
+                context_msg = f"Deck + Web:\n{context[:1500]}\n\nWeb:\n{web_result}"
             else:
-                context_msg = f"Deck Section:\n{section_text}"
-        elif any(x in lower_q for x in ["lawsuit", "legal", "controversy", "reputation"]):
-            web_result = search_serpapi(user_query)
-            context_msg = f"Deck + Web:\n{context[:1500]}\n\nWeb:\n{web_result}"
-        else:
-            context_msg = f"Deck:\n{context[:3000]}"
+                context_msg = f"Deck:\n{context[:3000]}"
 
-        # Use streaming messages
-        messages = [
-            SystemMessage(content="You are a VC analyst AI. Give crisp, factual answers from pitch deck or web."),
-            HumanMessage(content=f"{context_msg}\n\nQuestion: {user_query}")
-        ]
+            # Use streaming messages
+            messages = [
+                SystemMessage(content="You are a VC analyst AI. Give crisp, factual answers from pitch deck or web."),
+                HumanMessage(content=f"{context_msg}\n\nQuestion: {user_query}")
+            ]
 
-        # Chat output
-        st.markdown(f"**🧑 You:** {user_query}")
-        st.markdown("**🤖 Manna:**")
-        output_col = st.empty()
-        full_output = ""
+            # Debug: Check message format
+            logger.info(f"Messages format: {[type(msg).__name__ for msg in messages]}")
 
-        for chunk in llm.stream(messages, callbacks=[stream_handler]):
-            if chunk.content:
-                full_output += chunk.content
-                output_col.markdown(full_output)
+            # Chat output
+            st.markdown(f"**🧑 You:** {user_query}")
+            st.markdown("**🤖 Manna:**")
+
+            def generate_response():
+                for chunk in llm.stream(messages):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        yield chunk.content
+
+            full_output = st.write_stream(generate_response())
+
+        except RateLimitError:
+            st.error("❌ Rate limit exceeded. Please try again in a minute.")
+            full_output = "Rate limit exceeded."
+        except APIError as e:
+            st.error(f"❌ OpenAI API error: {str(e)}")
+            full_output = f"API error: {str(e)}"
+        except Exception as e:
+            st.error(f"❌ Unexpected error: {str(e)}")
+            logger.error(f"Streaming error: {str(e)}", exc_info=True)
+            
+            # Fallback to non-streaming
+            try:
+                response = llm.invoke(messages)
+                full_output = response.content
+                st.markdown(full_output)
+            except Exception as fallback_e:
+                st.error(f"❌ Fallback also failed: {str(fallback_e)}")
+                full_output = "Error generating response."
 
         st.session_state.chat_history.append(
             (user_query, full_output.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
