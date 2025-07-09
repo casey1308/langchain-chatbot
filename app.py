@@ -117,20 +117,12 @@ def extract_crm_structured_data(text):
         CRITICAL: Use these EXACT keys and provide specific values or "Not mentioned":
         
         company_name: [Extract exact company name]
-        valuation: [Extract current valuation with currency and amount, e.g., "$5M pre-money" or "Not mentioned"]
-        revenue: [Extract current revenue figures with specific numbers, e.g., "$500K ARR" or "Not mentioned"]
         ask: [Extract funding amount being sought, e.g., "$2M Series A" or "Not mentioned"]
+        revenue: [Extract current revenue figures with specific numbers, e.g., "$500K ARR" or "Not mentioned"]
+        valuation: [Extract current valuation with currency and amount, e.g., "$5M pre-money" or "Not mentioned"]
         source: [Always put "Pitch Deck Upload"]
-        
-        ADDITIONAL CONTEXT (for analysis only):
-        industry: [Industry/sector]
-        stage: [Funding stage]
-        founder_name: [Primary founder name]
-        founder_role: [Primary founder role]
-        location: [Company location]
-        employees: [Team size/employee count]
-        customers: [Customer metrics]
-        market_size: [Addressable market size]
+        assign: [Extract founder names and key team members, e.g., "John Doe (CEO), Jane Smith (CTO)" or "Not mentioned"]
+        description: [Brief 2-3 sentence description of what the company does]
         
         INSTRUCTIONS:
         1. Extract SPECIFIC numbers and amounts wherever possible
@@ -139,7 +131,9 @@ def extract_crm_structured_data(text):
         4. Be precise with valuation (pre-money/post-money distinction)
         5. For ask: include round type if mentioned (Seed, Series A, etc.)
         6. For revenue: include type if mentioned (ARR, MRR, total revenue)
-        7. Source should always be "Pitch Deck Upload"
+        7. For assign: include founder names and key roles
+        8. For description: keep it concise and business-focused
+        9. Source should always be "Pitch Deck Upload"
         
         Text to analyze:
         """
@@ -155,6 +149,68 @@ def extract_crm_structured_data(text):
     except Exception as e:
         logger.error(f"Error extracting CRM structured data: {e}")
         return "Error extracting structured data"
+
+# Parse CRM data into structured format
+def parse_crm_data(structured_text):
+    """Parse the structured text into a dictionary for CRM integration"""
+    crm_data = {}
+    lines = structured_text.split('\n')
+    
+    for line in lines:
+        line = line.strip()
+        if ':' in line:
+            key, value = line.split(':', 1)
+            key = key.strip().lower()
+            value = value.strip()
+            
+            # Map to CRM fields - only keep the core CRM fields
+            if key in ['company_name', 'ask', 'revenue', 'valuation', 'source', 'assign', 'description']:
+                crm_data[key] = value if value and value != "Not mentioned" else ""
+    
+    return crm_data
+
+# Check if query is asking for specific CRM data
+def is_specific_crm_query(query):
+    """Check if the query is asking for specific CRM information"""
+    query_lower = query.lower()
+    
+    specific_keywords = {
+        'ask': ['ask', 'funding', 'investment', 'raise', 'capital', 'seeking', 'round'],
+        'founder': ['founder', 'ceo', 'team', 'who founded', 'leadership', 'management'],
+        'revenue': ['revenue', 'sales', 'income', 'earnings', 'arr', 'mrr'],
+        'valuation': ['valuation', 'worth', 'valued', 'pre-money', 'post-money'],
+        'company': ['company name', 'what company', 'name of company'],
+        'description': ['what do they do', 'what does the company do', 'business', 'product', 'service']
+    }
+    
+    for field, keywords in specific_keywords.items():
+        if any(keyword in query_lower for keyword in keywords):
+            return field
+    
+    return None
+
+# Generate specific CRM response
+def generate_crm_response(field, crm_data):
+    """Generate a focused response for specific CRM field queries"""
+    if not crm_data:
+        return "No CRM data available. Please upload a pitch deck first."
+    
+    field_mapping = {
+        'company': 'company_name',
+        'founder': 'assign',
+        'ask': 'ask',
+        'revenue': 'revenue',
+        'valuation': 'valuation',
+        'description': 'description'
+    }
+    
+    crm_field = field_mapping.get(field, field)
+    value = crm_data.get(crm_field, "Not mentioned")
+    
+    if not value or value == "Not mentioned":
+        return f"**{field.title()}:** Not mentioned in the pitch deck."
+    
+    return f"**{field.title()}:** {value}"
 
 # Enhanced comprehensive analysis
 def extract_comprehensive_analysis(text):
@@ -240,27 +296,6 @@ def extract_comprehensive_analysis(text):
     except Exception as e:
         logger.error(f"Error generating comprehensive analysis: {e}")
         return "Error generating comprehensive analysis"
-
-# Parse CRM data into structured format
-def parse_crm_data(structured_text):
-    """Parse the structured text into a dictionary for CRM integration"""
-    crm_data = {}
-    lines = structured_text.split('\n')
-    
-    for line in lines:
-        line = line.strip()
-        if ':' in line:
-            key, value = line.split(':', 1)
-            key = key.strip().lower()
-            value = value.strip()
-            
-            # Map to CRM fields
-            if key in ['company_name', 'valuation', 'revenue', 'ask', 'source']:
-                crm_data[key] = value if value and value != "Not mentioned" else ""
-            elif key in ['industry', 'stage', 'founder_name', 'founder_role', 'location', 'employees', 'customers', 'market_size']:
-                crm_data[key] = value if value and value != "Not mentioned" else ""
-    
-    return crm_data
 
 # Enhanced section matching
 def match_section(key, sections, structured_data=None):
@@ -398,10 +433,13 @@ with st.sidebar:
         st.header("🔗 CRM Integration Data")
         
         # Display key CRM fields
-        crm_fields = ['company_name', 'valuation', 'revenue', 'ask', 'source']
+        crm_fields = ['company_name', 'ask', 'revenue', 'valuation', 'source', 'assign', 'description']
         for field in crm_fields:
             if field in st.session_state.crm_data and st.session_state.crm_data[field]:
-                st.write(f"**{field.replace('_', ' ').title()}:** {st.session_state.crm_data[field]}")
+                display_value = st.session_state.crm_data[field]
+                if len(display_value) > 50:
+                    display_value = display_value[:50] + "..."
+                st.write(f"**{field.replace('_', ' ').title()}:** {display_value}")
         
         # Export CRM data button
         if st.button("📤 Export CRM Data"):
@@ -456,26 +494,12 @@ if hasattr(st.session_state, 'show_crm_summary') and st.session_state.show_crm_s
     st.header("📊 CRM Data Summary")
     
     if st.session_state.crm_data:
-        # Primary CRM fields
-        st.subheader("🔑 Primary CRM Fields")
-        col1, col2 = st.columns(2)
+        # Display CRM data in clean format
+        st.subheader("🔑 CRM Fields")
         
-        with col1:
-            st.metric("Company", st.session_state.crm_data.get('company_name', 'Not specified'))
-            st.metric("Valuation", st.session_state.crm_data.get('valuation', 'Not specified'))
-            st.metric("Revenue", st.session_state.crm_data.get('revenue', 'Not specified'))
-        
-        with col2:
-            st.metric("Funding Ask", st.session_state.crm_data.get('ask', 'Not specified'))
-            st.metric("Source", st.session_state.crm_data.get('source', 'Not specified'))
-        
-        # Additional context
-        st.subheader("📋 Additional Context")
-        additional_fields = ['industry', 'stage', 'founder_name', 'founder_role', 'location', 'employees', 'customers', 'market_size']
-        
-        for field in additional_fields:
-            if field in st.session_state.crm_data and st.session_state.crm_data[field]:
-                st.write(f"**{field.replace('_', ' ').title()}:** {st.session_state.crm_data[field]}")
+        for field, value in st.session_state.crm_data.items():
+            if value:
+                st.write(f"**{field.replace('_', ' ').title()}:** {value}")
         
         # JSON export
         st.subheader("📤 Export Data")
@@ -532,13 +556,15 @@ if file:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.metric("Company", st.session_state.crm_data.get('company_name', 'Not found')[:20] + "..." if len(st.session_state.crm_data.get('company_name', '')) > 20 else st.session_state.crm_data.get('company_name', 'Not found'))
+            company_name = st.session_state.crm_data.get('company_name', 'Not found')
+            display_name = company_name[:20] + "..." if len(company_name) > 20 else company_name
+            st.metric("Company", display_name)
         
         with col2:
-            st.metric("Valuation", st.session_state.crm_data.get('valuation', 'Not found'))
+            st.metric("Ask", st.session_state.crm_data.get('ask', 'Not found'))
         
         with col3:
-            st.metric("Ask", st.session_state.crm_data.get('ask', 'Not found'))
+            st.metric("Valuation", st.session_state.crm_data.get('valuation', 'Not found'))
 
 # Show selected section
 if hasattr(st.session_state, 'selected_section') and st.session_state.selected_section:
@@ -547,26 +573,40 @@ if hasattr(st.session_state, 'selected_section') and st.session_state.selected_s
 
 # Enhanced prompt input
 st.markdown("### 💬 Ask Questions")
-st.markdown("**Quick Actions:**")
+st.markdown("**Quick CRM Queries:**")
 col1, col2, col3 = st.columns(3)
 
 with col1:
+    if st.button("💰 What is their ask?"):
+        st.session_state.auto_query = "What is their ask?"
+
+with col2:
+    if st.button("👥 Who are the founders?"):
+        st.session_state.auto_query = "Who are the founders?"
+
+with col3:
+    if st.button("💵 What is their revenue?"):
+        st.session_state.auto_query = "What is their revenue?"
+
+col4, col5, col6 = st.columns(3)
+
+with col4:
+    if st.button("🏢 Company valuation?"):
+        st.session_state.auto_query = "What is their valuation?"
+
+with col5:
+    if st.button("📋 Company description?"):
+        st.session_state.auto_query = "What does the company do?"
+
+with col6:
     if st.button("📊 Full Analysis"):
         st.session_state.auto_query = "Provide a comprehensive analysis of this pitch deck"
 
-with col2:
-    if st.button("👥 Founder Analysis"):
-        st.session_state.auto_query = "Analyze the founders' backgrounds, experience, and team composition"
-
-with col3:
-    if st.button("💰 Financial Analysis"):
-        st.session_state.auto_query = "Analyze the financial aspects including valuation, revenue, and funding ask"
-
-st.markdown("**Example queries:**")
-st.markdown("- `Provide a comprehensive VC analysis of this pitch deck`")
-st.markdown("- `What are the key risks and opportunities?`")
-st.markdown("- `Analyze the competitive landscape and market opportunity`")
-st.markdown("- `What due diligence questions should I ask?`")
+st.markdown("**Example specific queries:**")
+st.markdown("- `What is their ask?` - Returns just the funding ask")
+st.markdown("- `Who are the founders?` - Returns just founder information")
+st.markdown("- `What is their revenue?` - Returns just revenue data")
+st.markdown("- `What does the company do?` - Returns just company description")
 
 # Handle auto queries
 if hasattr(st.session_state, 'auto_query') and st.session_state.auto_query:
@@ -579,112 +619,98 @@ if user_query:
     # Clear any selected chat when asking new question
     st.session_state.selected_chat_index = None
     
-    with st.spinner("🤖 Analyzing..."):
-        try:
-            context = st.session_state.parsed_doc or ""
-            llm = ChatOpenAI(
-                model="gpt-4o", 
-                openai_api_key=openai_api_key, 
-                streaming=True,
-                temperature=0.1,  # Lower temperature for more analytical responses
-                max_tokens=2000
-            )
-            
-            lower_q = user_query.lower()
-
-            # Enhanced intent matching for deeper analysis
-            intent_keys = {
-                "comprehensive": ["comprehensive", "full analysis", "complete analysis", "overall", "summary", "evaluate", "assessment"],
-                "founder": ["founder", "team", "leadership", "management", "background", "experience"],
-                "financial": ["financial", "valuation", "revenue", "funding", "ask", "investment", "money"],
-                "market": ["market", "competition", "competitive", "industry", "opportunity"],
-                "product": ["product", "technology", "solution", "features"],
-                "traction": ["traction", "metrics", "growth", "customers", "users"],
-                "risks": ["risks", "challenges", "concerns", "red flags", "weaknesses"],
-                "due_diligence": ["due diligence", "questions", "investigation", "research"]
-            }
-
-            # Check for comprehensive analysis
-            is_comprehensive = any(keyword in lower_q for keyword in intent_keys.get("comprehensive", []))
-            
-            if is_comprehensive:
+    # Check if this is a specific CRM query
+    specific_field = is_specific_crm_query(user_query)
+    
+    if specific_field and st.session_state.crm_data:
+        # Handle specific CRM queries with direct response
+        response = generate_crm_response(specific_field, st.session_state.crm_data)
+        
+        st.markdown(f"**🧑 You:** {user_query}")
+        st.markdown("**🤖 Manna:**")
+        st.markdown(response)
+        
+        # Store in chat history
+        st.session_state.chat_history.append(
+            (user_query, response, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
+    else:
+        # Handle comprehensive queries
+        with st.spinner("🤖 Analyzing..."):
+            try:
+                context = st.session_state.parsed_doc or ""
+                llm = ChatOpenAI(
+                    model="gpt-4o", 
+                    openai_api_key=openai_api_key, 
+                    streaming=True,
+                    temperature=0.1,
+                    max_tokens=2000
+                )
+                
                 # Generate comprehensive analysis if not already done
                 if not hasattr(st.session_state, 'comprehensive_analysis'):
                     st.session_state.comprehensive_analysis = extract_comprehensive_analysis(context)
                 
                 context_msg = f"COMPREHENSIVE ANALYSIS:\n{st.session_state.comprehensive_analysis}\n\nCRM DATA:\n{st.session_state.structured_data}\n\nFULL DOCUMENT:\n{context[:2000]}"
-            else:
-                # Find matching intent
-                matched_intent = None
-                for intent, keywords in intent_keys.items():
-                    if any(keyword in lower_q for keyword in keywords):
-                        matched_intent = intent
-                        break
+
+                # Enhanced system message for deeper analysis
+                system_msg = """You are a senior VC analyst with 15+ years of experience. Provide DEEP, actionable insights for investment decisions.
+
+                Analysis Guidelines:
+                1. Be specific and cite exact information from the deck
+                2. Provide concrete numbers, metrics, and percentages
+                3. Highlight missing critical information
+                4. Identify red flags and investment risks
+                5. Suggest specific due diligence questions
+                6. Compare against industry benchmarks when relevant
+                7. Provide clear investment recommendation rationale
+                8. Focus on scalability and market opportunity assessment
+                9. Analyze team capability for execution
+                10. Evaluate competitive moat and differentiation
                 
-                if matched_intent:
-                    section_text = match_section(matched_intent, st.session_state.sections, st.session_state.structured_data)
-                    context_msg = f"FOCUSED ANALYSIS ({matched_intent}):\n{section_text}\n\nCRM DATA:\n{st.session_state.structured_data}\n\nFULL CONTEXT:\n{context[:2000]}"
-                else:
-                    context_msg = f"FULL ANALYSIS:\n{context[:3000]}\n\nCRM DATA:\n{st.session_state.structured_data}"
+                Response Format:
+                - Use clear headers and bullet points
+                - Include specific actionable insights
+                - Highlight key metrics and financial data
+                - Provide both opportunities and risks
+                - End with specific next steps or questions
+                """
 
-            # Enhanced system message for deeper analysis
-            system_msg = """You are a senior VC analyst with 15+ years of experience. Provide DEEP, actionable insights for investment decisions.
+                messages = [
+                    SystemMessage(content=system_msg),
+                    HumanMessage(content=f"{context_msg}\n\nVC Analysis Request: {user_query}")
+                ]
 
-            Analysis Guidelines:
-            1. Be specific and cite exact information from the deck
-            2. Provide concrete numbers, metrics, and percentages
-            3. Highlight missing critical information
-            4. Identify red flags and investment risks
-            5. Suggest specific due diligence questions
-            6. Compare against industry benchmarks when relevant
-            7. Provide clear investment recommendation rationale
-            8. Focus on scalability and market opportunity assessment
-            9. Analyze team capability for execution
-            10. Evaluate competitive moat and differentiation
-            
-            Response Format:
-            - Use clear headers and bullet points
-            - Include specific actionable insights
-            - Highlight key metrics and financial data
-            - Provide both opportunities and risks
-            - End with specific next steps or questions
-            """
+                # Display the conversation
+                st.markdown(f"**🧑 You:** {user_query}")
+                st.markdown("**🤖 Manna:**")
 
-            messages = [
-                SystemMessage(content=system_msg),
-                HumanMessage(content=f"{context_msg}\n\nVC Analysis Request: {user_query}")
-            ]
+                # Create a placeholder for the streaming response
+                response_placeholder = st.empty()
+                full_response = ""
 
-            # Display the conversation
-            st.markdown(f"**🧑 You:** {user_query}")
-            st.markdown("**🤖 Manna:**")
+                # Stream the response
+                for chunk in llm.stream(messages):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        full_response += chunk.content
+                        response_placeholder.markdown(full_response + "▌")
+                
+                # Remove the cursor and show final response
+                response_placeholder.markdown(full_response)
+                
+                # Store in chat history
+                st.session_state.chat_history.append(
+                    (user_query, full_response.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                )
 
-            # Create a placeholder for the streaming response
-            response_placeholder = st.empty()
-            full_response = ""
-
-            # Stream the response
-            for chunk in llm.stream(messages):
-                if hasattr(chunk, 'content') and chunk.content:
-                    full_response += chunk.content
-                    response_placeholder.markdown(full_response + "▌")
-            
-            # Remove the cursor and show final response
-            response_placeholder.markdown(full_response)
-            
-            # Store in chat history
-            st.session_state.chat_history.append(
-                (user_query, full_response.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            )
-
-        except RateLimitError:
-            st.error("❌ Rate limit exceeded. Please try again in a minute.")
-        except APIError as e:
-            st.error(f"❌ OpenAI API error: {str(e)}")
-        except Exception as e:
-            st.error(f"❌ Unexpected error: {str(e)}")
-            logger.error(f"Analysis error: {str(e)}", exc_info=True)
+            except RateLimitError:
+                st.error("❌ Rate limit exceeded. Please try again in a minute.")
+            except APIError as e:
+                st.error(f"❌ OpenAI API error: {str(e)}")
+            except Exception as e:
+                st.error(f"❌ Unexpected error: {str(e)}")
+                logger.error(f"Analysis error: {str(e)}", exc_info=True)
 
 # Footer
 st.markdown("---")
-st.markdown("**💡 Pro Tip:** Use the CRM data export feature to integrate directly with your Zoho CRM dealflow module.")
+st.markdown("**💡 Pro Tip:** Use specific queries like 'What is their ask?' for quick CRM data, or ask comprehensive questions for detailed analysis.")
