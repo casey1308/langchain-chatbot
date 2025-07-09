@@ -465,7 +465,7 @@ if file:
         send_to_zoho_webhook(st.session_state.crm_data)
     st.success("✅ Pitch deck parsed and CRM data extracted!")
     
-    if st.session_state.crm_data:
+  if st.session_state.crm_data:
     st.subheader("🔗 CRM Data Preview")
 
     card_html = """
@@ -561,7 +561,6 @@ if file:
     )
 
     st.markdown(card_html, unsafe_allow_html=True)
-
 
 if hasattr(st.session_state, 'selected_section') and st.session_state.selected_section:
     st.subheader(f"📖 {st.session_state.selected_section}")
