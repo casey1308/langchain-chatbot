@@ -236,6 +236,44 @@ def search_serpapi(query):
 st.set_page_config(page_title="Manna — VC Pitch Evaluator", page_icon="📊")
 st.title("📊 Manna — VC Pitch Evaluator")
 
+# Sidebar content
+with st.sidebar:
+    st.header("📋 Detected Sections")
+    if st.session_state.sections:
+        for section_name in st.session_state.sections.keys():
+            if st.button(section_name, key=f"section_{section_name}"):
+                st.session_state.selected_section = section_name
+    
+    # Show quick stats
+    if st.session_state.file_uploaded:
+        st.header("📊 Quick Stats")
+        st.write(f"Total sections: {len(st.session_state.sections)}")
+        st.write(f"Total text length: {len(st.session_state.parsed_doc)} chars")
+    
+    # Show structured data
+    if st.session_state.structured_data:
+        st.header("🔍 Extracted Data")
+        with st.expander("View Structured Data"):
+            st.text_area("Structured Analysis", st.session_state.structured_data, height=300, key="structured_data_sidebar")
+    
+    # Chat History in Sidebar
+    if st.session_state.chat_history:
+        st.header("💬 Chat History")
+        
+        # Add clear chat button
+        if st.button("🗑️ Clear Chat History"):
+            st.session_state.chat_history = []
+            st.rerun()
+        
+        # Display chat history in reverse order (newest first)
+        for i, (user, bot, timestamp) in enumerate(reversed(st.session_state.chat_history)):
+            with st.expander(f"Q{len(st.session_state.chat_history)-i}: {user[:30]}..."):
+                st.markdown(f"**🧑 You:** {user}")
+                st.markdown(f"**🤖 Manna:**")
+                st.markdown(bot)
+                st.markdown(f"*{timestamp}*")
+
+# Main content area
 # Upload
 file = st.file_uploader("📄 Upload a startup pitch deck (PDF)", type=["pdf"])
 
@@ -252,18 +290,6 @@ if file:
             st.session_state.structured_data = extract_structured_data(text)
         
     st.success("✅ Pitch deck parsed and analyzed!")
-    
-    # Show extracted sections in sidebar
-    with st.sidebar:
-        st.header("📋 Detected Sections")
-        for section_name in st.session_state.sections.keys():
-            if st.button(section_name, key=f"section_{section_name}"):
-                st.session_state.selected_section = section_name
-        
-        # Show quick stats
-        st.header("📊 Quick Stats")
-        st.write(f"Total sections: {len(st.session_state.sections)}")
-        st.write(f"Total text length: {len(st.session_state.parsed_doc)} chars")
 
 # Show selected section
 if hasattr(st.session_state, 'selected_section') and st.session_state.selected_section:
@@ -368,18 +394,6 @@ if user_query:
         st.session_state.chat_history.append(
             (user_query, full_output.strip(), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         )
-
-# Chat history
-if st.session_state.chat_history:
-    st.subheader("💬 Chat History")
-    for user, bot, timestamp in st.session_state.chat_history:
-        with st.expander(f"Q: {user[:50]}... - {timestamp}"):
-            st.markdown(f"**🧑 You:** {user}")
-            st.markdown(f"**🤖 Manna:**\n{bot}")
-
-# Show structured data in sidebar
-if st.session_state.structured_data:
-    with st.sidebar:
-        st.header("🔍 Extracted Data")
-        with st.expander("View Structured Data"):
-            st.text_area("Structured Analysis", st.session_state.structured_data, height=300)
+        
+        # Rerun to update sidebar
+        st.rerun()
