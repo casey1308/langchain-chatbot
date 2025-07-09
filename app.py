@@ -698,7 +698,6 @@ if uploaded_file:
             if not validation["valid"]:
                 st.error("⚠️ Data extraction issues detected")
 
-d")
                 for error in validation["errors"]:
                     st.error(f"❌ {error}")
             
