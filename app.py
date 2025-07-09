@@ -301,67 +301,66 @@ def validate_crm_data(crm_data):
     return validation_results
 
 # Updated file processing section
-if file:
+uploaded_file = st.file_uploader("Upload your pitch deck (PDF)", type=["pdf"])
+
+if uploaded_file:
     with st.spinner("🔄 Processing pitch deck..."):
-        file_bytes = file.read()
+        file_bytes = uploaded_file.read()
         text = extract_pdf_text(file_bytes)
         st.session_state.parsed_doc = text
         st.session_state.sections = split_sections(text)
         st.session_state.file_uploaded = True
 
-    with st.spinner("🧠 Extracting CRM data with AI..."):
-        crm_structured_text = extract_crm_structured_data(text)
-        st.session_state.structured_data = crm_structured_text
-        st.session_state.crm_data = parse_crm_data(crm_structured_text)
+        with st.spinner("🧠 Extracting CRM data with AI..."):
+            crm_structured_text = extract_crm_structured_data(text)
+            st.session_state.structured_data = crm_structured_text
+            st.session_state.crm_data = parse_crm_data(crm_structured_text)
+            
+            # Validate the extracted data
+            validation = validate_crm_data(st.session_state.crm_data)
+            
+            if not validation["valid"]:
+                st.error("⚠️ Data extraction issues detected:")
+                for error in validation["errors"]:
+                    st.error(f"- {error}")
+                with st.expander("🔍 Debug: Raw Extraction"):
+                    st.code(crm_structured_text)
+                st.warning("Retrying with simplified extraction...")
+                retry_prompt = f"""
+                Extract key information from this pitch deck in simple format:
+
+                Company: [company name]
+                Industry: [industry/sector]
+                Stage: [funding stage]
+                Funding: [amount requested]
+                Revenue: [current revenue]
+                Value: [valuation]
+                Founders: [founder names]
+
+                Text: {text[:5000]}
+                """
+                try:
+                    llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
+                    retry_response = llm.invoke(retry_prompt)
+                    st.info("Retry extraction:")
+                    st.code(retry_response.content)
+                except Exception as e:
+                    st.error(f"Retry failed: {e}")
+            
+            if validation["warnings"]:
+                for warning in validation["warnings"]:
+                    st.warning(f"⚠️ {warning}")
         
-        # Validate the extracted data
-        validation = validate_crm_data(st.session_state.crm_data)
+        # Only proceed with Zoho if validation passed
+        if validation["valid"]:
+            with st.spinner("🔗 Sending to Zoho CRM..."):
+                formatted_crm_data = format_crm_data_for_zoho(st.session_state.crm_data)
+                webhook_success = send_to_zoho_webhook(formatted_crm_data)
+                display_zoho_status(webhook_success, st.session_state.crm_data)
         
-        if not validation["valid"]:
-            st.error("⚠️ Data extraction issues detected:")
-            for error in validation["errors"]:
-                st.error(f"- {error}")
-            
-            # Show raw extraction for debugging
-            with st.expander("🔍 Debug: Raw Extraction"):
-                st.code(crm_structured_text)
-            
-            # Retry extraction with simpler prompt
-            st.warning("Retrying with simplified extraction...")
-            retry_prompt = f"""
-            Extract key information from this pitch deck in simple format:
-            
-            Company: [company name]
-            Industry: [industry/sector]
-            Stage: [funding stage]
-            Funding: [amount requested]
-            Revenue: [current revenue]
-            Value: [valuation]
-            Founders: [founder names]
-            
-            Text: {text[:5000]}
-            """
-            
-            try:
-                llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
-                retry_response = llm.invoke(retry_prompt)
-                st.info("Retry extraction:")
-                st.code(retry_response.content)
-            except Exception as e:
-                st.error(f"Retry failed: {e}")
-        
-        if validation["warnings"]:
-            for warning in validation["warnings"]:
-                st.warning(f"⚠️ {warning}")
-    
-    # Only proceed with Zoho if validation passed
-    if validation["valid"]:
-        with st.spinner("🔗 Sending to Zoho CRM..."):
-            formatted_crm_data = format_crm_data_for_zoho(st.session_state.crm_data)
-            webhook_success = send_to_zoho_webhook(formatted_crm_data)
-            display_zoho_status(webhook_success, st.session_state.crm_data)
-    
-    st.success("✅ Pitch deck processed successfully!")
+        st.success("✅ Pitch deck processed successfully!")
+
+
 def format_crm_data_for_zoho(crm_data):
     """Enhanced CRM data formatting for Zoho with validation"""
     
