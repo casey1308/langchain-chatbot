@@ -123,32 +123,47 @@ def evaluate_pitch_table(sections):
 # Smart web search on startup/founder
 def run_auto_web_search(text):
     try:
-        # Extract probable startup/founder keywords
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-        query_extract_prompt = f"""
-        From the following pitch content, extract a single search query about the startup
-        that would help a VC find useful information online.
-        Respond only with the search query — no explanation.
+        query_prompt = f"""
+        From this pitch content, generate a single search query that would help a VC look up any legal or reputational issues about the startup (lawsuits, fraud, controversies, etc). Respond only with the query string.
 
         Text:
-        {text[:2500]}
+        {text[:2000]}
         """
-        query = llm.invoke(query_extract_prompt).content.strip()
+        query = llm.invoke(query_prompt).content.strip()
+
         if not query:
-            return "❌ Could not generate query for web search."
-        
-        search = TavilySearchAPIWrapper(tavily_api_key=tavily_api_key)
-        results = search.results(query=query, max_results=3)
+            return "❌ Could not generate a proper query for web search."
 
-        context = "\n\n".join(f"{r['title']}:\n{clean_text(r['content'][:800])}" for r in results if r.get("content"))
-        st.session_state.web_context = context
+        st.info(f"🔍 Running web search for: **{query}**")
 
-        return ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key).invoke(
-            f"Summarize the following search results for VC relevance:\n\n{context}"
-        ).content.strip()
+        tavily = TavilySearchAPIWrapper(tavily_api_key=tavily_api_key)
+
+        try:
+            # Use `.run()` for simple fallback (if .results fails)
+            search_output = tavily.run(query)
+            return search_output
+        except:
+            # Backup request using `requests`
+            import requests
+            headers = {"Authorization": f"Bearer {tavily_api_key}"}
+            params = {"query": query, "max_results": 3}
+            r = requests.get("https://api.tavily.com/search", headers=headers, params=params)
+            if r.status_code == 200:
+                raw = r.json()
+                articles = raw.get("results", [])
+                if not articles:
+                    return "🔍 No relevant web results found."
+                text = "\n\n".join(f"{a['title']}\n{a['content'][:800]}" for a in articles if a.get("content"))
+                return ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key).invoke(
+                    f"Summarize the following articles from a VC legal risk angle:\n\n{text}"
+                ).content.strip()
+            else:
+                return f"🌐 Web search failed: {r.status_code} {r.reason}"
 
     except Exception as e:
-        return f"🌐 Web search failed: {e}"
+        return f"🌐 Web search failed: {str(e)}"
+
 
 # Streamlit UI
 st.set_page_config(page_title="Manna — VC Evaluator", page_icon="📊")
