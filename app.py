@@ -785,19 +785,37 @@ if st.session_state.file_uploaded:
             st.rerun()
     
     # Chat input
-    if st.session_state.selected_chat_index is None:
-        user_query = st.text_input("💭 Ask anything about this pitch deck:", key="user_query")
+  # Replace the problematic section around line 850-870 with this fixed version:
+
+# Chat input using form (RECOMMENDED APPROACH)
+if st.session_state.selected_chat_index is None:
+    # Quick action buttons
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        if st.button("🚀 Quick Analysis", use_container_width=True):
+            user_query = "Give me a quick analysis of this pitch deck"
+            st.session_state.process_query = user_query
+    with col2:
+        if st.button("💰 Investment Potential", use_container_width=True):
+            user_query = "What's the investment potential of this company?"
+            st.session_state.process_query = user_query
+    with col3:
+        if st.button("⚠️ Risk Assessment", use_container_width=True):
+            user_query = "What are the main risks with this investment?"
+            st.session_state.process_query = user_query
+    
+    # Chat form
+    with st.form("chat_form", clear_on_submit=True):
+        user_query = st.text_input("💭 Ask anything about this pitch deck:")
+        submitted = st.form_submit_button("Send")
         
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col1:
-            if st.button("🚀 Quick Analysis", use_container_width=True):
-                user_query = "Give me a quick analysis of this pitch deck"
-        with col2:
-            if st.button("💰 Investment Potential", use_container_width=True):
-                user_query = "What's the investment potential of this company?"
-        with col3:
-            if st.button("⚠️ Risk Assessment", use_container_width=True):
-                user_query = "What are the main risks with this investment?"
+        if submitted and user_query:
+            st.session_state.process_query = user_query
+    
+    # Process query if one exists
+    if st.session_state.get('process_query'):
+        user_query = st.session_state.process_query
+        del st.session_state.process_query  # Clear it
         
         if user_query:
             with st.spinner("🤔 Analyzing your question..."):
@@ -863,10 +881,8 @@ if st.session_state.file_uploaded:
                 st.markdown(f"**Your Question:** {user_query}")
                 st.markdown(f"**AI Response:** {response}")
                 
-                # Clear the input
-                st.session_state.user_query = ""
+                # Automatically rerun to clear the processed query
                 st.rerun()
-
 # Enhanced section viewer
 if st.session_state.get('selected_section'):
     st.markdown(f"### 📑 Section: {st.session_state.selected_section}")
