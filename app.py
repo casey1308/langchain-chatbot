@@ -106,74 +106,227 @@ def split_sections(text):
     return {k: "\n".join(v) for k, v in sections.items() if v}
 
 # Enhanced CRM-focused data extraction
+# Enhanced CRM-focused data extraction with better parsing
 def extract_crm_structured_data(text):
     """Extract CRM-specific structured data from pitch deck using LLM"""
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
 
         extraction_prompt = """
-        Analyze this pitch deck text and extract ONLY the following CRM-specific information in exact key-value format.
-        Look through ALL the text carefully and extract specific numbers, amounts, and concrete details.
+        Analyze this pitch deck text and extract CRM-specific information. 
+        Return the data in this EXACT format (key: value pairs separated by newlines):
         
-        CRITICAL: Use these EXACT keys and provide specific values or "Not mentioned":
-        
-        company_name: [Extract exact company name]
+        company_name: [Extract exact company name or "Not mentioned"]
         ask: [Extract funding amount being sought, e.g., "$2M Series A" or "Not mentioned"]
-        revenue: [Extract current revenue figures with specific numbers, e.g., "$500K ARR" or "Not mentioned"]
-        valuation: [Extract current valuation with currency and amount, e.g., "$5M pre-money" or "Not mentioned"]
+        revenue: [Extract current revenue figures, e.g., "$500K ARR" or "Not mentioned"]
+        valuation: [Extract current valuation, e.g., "$5M pre-money" or "Not mentioned"]
         sector: [Extract industry/sector, e.g., "FinTech", "HealthTech", "SaaS" or "Not mentioned"]
-        stage: [Extract company stage, e.g., "Pre-Seed", "Seed", "Series A", "Growth" or "Not mentioned"]
-        prior_funding: [Extract previous funding rounds briefly, e.g., "₹2Cr Seed 2023" or "Not mentioned"]
-        source: [Always put "Pitch Deck Upload"]
-        assign: [Extract founder names and key team members, e.g., "John Doe (CEO), Jane Smith (CTO)" or "Not mentioned"]
-        description: [Brief 1-2 sentence description of what the company does]
-        sector: [Extract industry/sector, e.g., "FinTech", "HealthTech", "SaaS" or "Not mentioned"]
-        stage: [Extract company stage, e.g., "Pre-Seed", "Seed", "Series A", "Growth" or "Not mentioned"]
-        prior_funding: [Extract previous funding rounds briefly, e.g., "₹2Cr Seed 2023" or "Not mentioned"]
+        stage: [Extract company stage, e.g., "Pre-Seed", "Seed", "Series A" or "Not mentioned"]
+        prior_funding: [Extract previous funding rounds, e.g., "₹2Cr Seed 2023" or "Not mentioned"]
+        source: Pitch Deck Upload
+        assign: [Extract founder names and roles, e.g., "John Doe (CEO), Jane Smith (CTO)" or "Not mentioned"]
+        description: [Brief 1-2 sentence description of what the company does or "Not mentioned"]
         
-        INSTRUCTIONS:
-        1. Extract SPECIFIC numbers and amounts wherever possible
-        2. Include currency symbols and units (K, M, B)
-        3. Look for information across ALL sections of the document
-        4. Be precise with valuation (pre-money/post-money distinction)
-        5. For ask: include round type if mentioned (Seed, Series A, etc.)
-        6. For revenue: include type if mentioned (ARR, MRR, total revenue)
-        7. For assign: include founder names and key roles
-        8. For description: keep it concise and business-focused
-        9. Source should always be "Pitch Deck Upload"
+        CRITICAL INSTRUCTIONS:
+        1. Return ONLY the key: value pairs in the exact format shown above
+        2. Do NOT add any additional text, explanations, or formatting
+        3. Look through the ENTIRE document for information
+        4. Extract specific numbers and amounts wherever possible
+        5. Include currency symbols and units (K, M, B, Cr)
+        6. If information is not found, use "Not mentioned"
+        7. Keep each value on a single line
         
         Text to analyze:
         """
 
         messages = [
-            SystemMessage(content="You are an expert at extracting CRM-specific structured data from pitch decks. Focus on extracting exact numbers, amounts, and concrete details. Be thorough and look for information throughout the entire document."),
+            SystemMessage(content="You are a data extraction specialist. Return ONLY the requested key-value pairs in the exact format specified. Do not add any additional text or explanations."),
             HumanMessage(content=f"{extraction_prompt}\n\n{text}")
         ]
 
         response = llm.invoke(messages)
-        return response.content
+        return response.content.strip()
 
     except Exception as e:
         logger.error(f"Error extracting CRM structured data: {e}")
-        return "Error extracting structured data"
+        return """company_name: Error extracting data
+ask: Not mentioned
+revenue: Not mentioned
+valuation: Not mentioned
+sector: Not mentioned
+stage: Not mentioned
+prior_funding: Not mentioned
+source: Pitch Deck Upload
+assign: Not mentioned
+description: Error extracting data"""
 
-# Parse CRM data into structured format
+# Improved parsing function with better error handling
 def parse_crm_data(structured_text):
     """Parse the structured text into a dictionary for CRM integration"""
     crm_data = {}
+    
+    if not structured_text:
+        logger.warning("No structured text provided for parsing")
+        return crm_data
+    
+    logger.info(f"Parsing structured text: {structured_text[:200]}...")
+    
     lines = structured_text.split('\n')
-
+    
     for line in lines:
         line = line.strip()
+        if not line:
+            continue
+            
         if ':' in line:
+            # Split only on the first colon to handle values with colons
             key, value = line.split(':', 1)
             key = key.strip().lower()
             value = value.strip()
-
-            # Map to CRM fields - only keep the core CRM fields
-            if key in ['company_name', 'ask', 'revenue', 'valuation', 'sector', 'stage', 'prior_funding', 'source', 'assign', 'description']:
-                crm_data[key] = value if value and value != "Not mentioned" else ""
+            
+            # Only keep valid CRM fields
+            valid_fields = ['company_name', 'ask', 'revenue', 'valuation', 'sector', 'stage', 'prior_funding', 'source', 'assign', 'description']
+            
+            if key in valid_fields:
+                # Clean up the value
+                if value and value.lower() not in ["not mentioned", "not found", "n/a", "na", ""]:
+                    crm_data[key] = value
+                else:
+                    crm_data[key] = "Not found"
+            else:
+                logger.warning(f"Unknown field encountered: {key}")
+    
+    # Ensure all required fields are present
+    required_fields = ['company_name', 'ask', 'revenue', 'valuation', 'sector', 'stage', 'prior_funding', 'source', 'assign', 'description']
+    for field in required_fields:
+        if field not in crm_data:
+            crm_data[field] = "Not found"
+    
+    logger.info(f"Parsed CRM data: {crm_data}")
     return crm_data
+
+# Enhanced debugging function to help troubleshoot
+def debug_crm_extraction(text):
+    """Debug function to help troubleshoot CRM extraction issues"""
+    logger.info("Starting CRM extraction debug...")
+    
+    # Check if text is available
+    if not text:
+        logger.error("No text provided for extraction")
+        return None
+    
+    logger.info(f"Text length: {len(text)} characters")
+    logger.info(f"Text preview: {text[:500]}...")
+    
+    try:
+        # Extract structured data
+        structured_text = extract_crm_structured_data(text)
+        logger.info(f"Structured text result: {structured_text}")
+        
+        # Parse the data
+        crm_data = parse_crm_data(structured_text)
+        logger.info(f"Final CRM data: {crm_data}")
+        
+        return crm_data
+        
+    except Exception as e:
+        logger.error(f"Debug extraction failed: {e}")
+        return None
+
+# Alternative fallback extraction using regex patterns
+def fallback_crm_extraction(text):
+    """Fallback extraction using regex patterns when LLM fails"""
+    logger.info("Using fallback CRM extraction...")
+    
+    crm_data = {
+        'company_name': 'Not found',
+        'ask': 'Not found',
+        'revenue': 'Not found',
+        'valuation': 'Not found',
+        'sector': 'Not found',
+        'stage': 'Not found',
+        'prior_funding': 'Not found',
+        'source': 'Pitch Deck Upload',
+        'assign': 'Not found',
+        'description': 'Not found'
+    }
+    
+    # Common patterns for extraction
+    patterns = {
+        'ask': [
+            r'seeking\s+[$₹]?(\d+(?:\.\d+)?)\s*([KMB]?)\s*(.*?)(?:funding|investment|capital)',
+            r'raise\s+[$₹]?(\d+(?:\.\d+)?)\s*([KMB]?)',
+            r'asking\s+for\s+[$₹]?(\d+(?:\.\d+)?)\s*([KMB]?)',
+            r'funding\s+required?\s*:?\s*[$₹]?(\d+(?:\.\d+)?)\s*([KMB]?)'
+        ],
+        'revenue': [
+            r'revenue\s+of\s+[$₹]?(\d+(?:\.\d+)?)\s*([KMB]?)',
+            r'[$₹](\d+(?:\.\d+)?)\s*([KMB]?)\s+ARR',
+            r'[$₹](\d+(?:\.\d+)?)\s*([KMB]?)\s+MRR',
+            r'sales\s+of\s+[$₹]?(\d+(?:\.\d+)?)\s*([KMB]?)'
+        ],
+        'valuation': [
+            r'valuation\s+of\s+[$₹]?(\d+(?:\.\d+)?)\s*([KMB]?)',
+            r'valued\s+at\s+[$₹]?(\d+(?:\.\d+)?)\s*([KMB]?)',
+            r'pre-money\s+[$₹]?(\d+(?:\.\d+)?)\s*([KMB]?)',
+            r'post-money\s+[$₹]?(\d+(?:\.\d+)?)\s*([KMB]?)'
+        ]
+    }
+    
+    # Try to extract using patterns
+    for field, field_patterns in patterns.items():
+        for pattern in field_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                value = match.group(1)
+                unit = match.group(2) if len(match.groups()) > 1 else ""
+                crm_data[field] = f"${value}{unit}" if unit else f"${value}"
+                break
+    
+    # Extract company name (usually appears early in the document)
+    company_patterns = [
+        r'(?:company|startup|firm)\s+name\s*:?\s*([A-Z][a-zA-Z\s&]+)',
+        r'^([A-Z][a-zA-Z\s&]+)\s+(?:pitch|deck|presentation)',
+        r'(?:founded|started)\s+([A-Z][a-zA-Z\s&]+)'
+    ]
+    
+    for pattern in company_patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+        if match:
+            crm_data['company_name'] = match.group(1).strip()
+            break
+    
+    return crm_data
+
+# Modified main extraction function with fallback
+def extract_crm_data_with_fallback(text):
+    """Main CRM extraction function with fallback mechanism"""
+    try:
+        # Try primary extraction
+        crm_data = debug_crm_extraction(text)
+        
+        # Check if extraction was successful
+        if crm_data and any(value != "Not found" for value in crm_data.values() if value != "Pitch Deck Upload"):
+            return crm_data
+        else:
+            logger.warning("Primary extraction failed, trying fallback...")
+            return fallback_crm_extraction(text)
+            
+    except Exception as e:
+        logger.error(f"All extraction methods failed: {e}")
+        # Return default structure
+        return {
+            'company_name': 'Extraction failed',
+            'ask': 'Not found',
+            'revenue': 'Not found',
+            'valuation': 'Not found',
+            'sector': 'Not found',
+            'stage': 'Not found',
+            'prior_funding': 'Not found',
+            'source': 'Pitch Deck Upload',
+            'assign': 'Not found',
+            'description': 'Extraction failed'
+        }
 
 def extract_number_cr(value):
     """Convert '₹ 12 Cr Pre-Series A' to 12.0 (float)"""
@@ -589,17 +742,57 @@ if file:
         st.session_state.sections = split_sections(text)
         st.session_state.file_uploaded = True
 
-        # Extract CRM-specific structured data
+        # Extract CRM-specific structured data with improved error handling
         with st.spinner("🔍 Extracting CRM data..."):
-            crm_structured_text = extract_crm_structured_data(text)
-            st.session_state.structured_data = crm_structured_text
-            st.session_state.crm_data = parse_crm_data(crm_structured_text)
-
-            # ✅ Add received_date (upload date)
-            st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d")
-
+            try:
+                # Use the improved extraction function
+                st.session_state.crm_data = extract_crm_data_with_fallback(text)
+                
+                # Add received_date (upload date)
+                st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d")
+                
+                # Also store the raw structured text for debugging
+                st.session_state.structured_data = extract_crm_structured_data(text)
+                
+                # Log the results for debugging
+                logger.info(f"CRM extraction completed. Found {len([k for k, v in st.session_state.crm_data.items() if v != 'Not found'])} fields")
+                
+                # Optional: Send to Zoho webhook if data is valid
+                if st.session_state.crm_data.get('company_name') != 'Not found':
+                    send_to_zoho_webhook(st.session_state.crm_data)
+                
+            except Exception as e:
+                logger.error(f"CRM extraction failed: {e}")
+                # Set default values on failure
+                st.session_state.crm_data = {
+                    'company_name': 'Extraction failed',
+                    'ask': 'Not found',
+                    'revenue': 'Not found',
+                    'valuation': 'Not found',
+                    'sector': 'Not found',
+                    'stage': 'Not found',
+                    'prior_funding': 'Not found',
+                    'source': 'Pitch Deck Upload',
+                    'assign': 'Not found',
+                    'description': 'Extraction failed',
+                    'received_date': datetime.today().strftime("%Y-%m-%d")
+                }
+                st.error(f"❌ CRM extraction failed: {e}")
 
     st.success("✅ Pitch deck parsed and CRM data extracted!")
+    
+    # Add debugging information
+    if st.checkbox("🔍 Show Debug Info"):
+        st.subheader("Debug Information")
+        st.write(f"**Text Length:** {len(st.session_state.parsed_doc)} characters")
+        st.write(f"**Sections Found:** {len(st.session_state.sections)}")
+        st.write(f"**CRM Fields Extracted:** {len([k for k, v in st.session_state.crm_data.items() if v != 'Not found'])}")
+        
+        with st.expander("Raw Structured Data"):
+            st.text(st.session_state.structured_data)
+            
+        with st.expander("Parsed CRM Data"):
+            st.json(st.session_state.crm_data)
 
     # Show CRM data preview
 if st.session_state.crm_data:
