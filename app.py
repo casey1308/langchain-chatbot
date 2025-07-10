@@ -458,8 +458,8 @@ def search_serpapi(query):
         return f"❌ Web search failed: {str(e)}"
 
 # UI layout
-st.set_page_config(page_title="Perpendo - The Pitch Evaluator", page_icon="📊")
-st.title("🕵️ Perpendo - The Pitch Evaluator")
+st.set_page_config(page_title="Augmento - The Pitch Evaluator", page_icon="🕵️")
+st.title("🕵️ Augmento - The Pitch Evaluator")
 
 # Sidebar content
 with st.sidebar:
