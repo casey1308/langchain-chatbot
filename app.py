@@ -463,7 +463,7 @@ st.title("🕵️ Perpendo - The Pitch Evaluator")
 
 # Sidebar content
 with st.sidebar:
-    st.header("📋 Detected Sections")
+    st.header("📋 Overview")
     if st.session_state.sections:
         for section_name in st.session_state.sections.keys():
             if st.button(section_name, key=f"section_{section_name}"):
