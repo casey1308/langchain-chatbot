@@ -171,11 +171,8 @@ def parse_crm_data(structured_text):
             value = value.strip()
 
             # Map to CRM fields - only keep the core CRM fields
-            # Map to CRM fields - only keep the core CRM fields
             if key in ['company_name', 'ask', 'revenue', 'valuation', 'sector', 'stage', 'prior_funding', 'source', 'assign', 'description']:
-               crm_data[key] = value if value and value != "Not mentioned" else ""
-                
-
+                crm_data[key] = value if value and value != "Not mentioned" else ""
     return crm_data
 
 def extract_number_cr(value):
@@ -197,18 +194,18 @@ def send_to_zoho_webhook(crm_data):
         
         # Preprocess values for Zoho
         crm_payload = {
-    "company_name": crm_data.get("company_name", ""),
-    "ask": extract_number_cr(crm_data.get("ask", "")),
-    "valuation": extract_number_cr(crm_data.get("valuation", "")),
-    "revenue": crm_data.get("revenue", ""),
-    "sector": crm_data.get("sector", ""),
-    "stage": crm_data.get("stage", ""),
-    "prior_funding": crm_data.get("prior_funding", ""),
-    "description": crm_data.get("description", ""),
-    "source": crm_data.get("source", ""),
-    "assign": crm_data.get("assign", ""),
-    "received_date": crm_data.get("received_date", "")
-}
+            "company_name": crm_data.get("company_name", ""),
+            "ask": extract_number_cr(crm_data.get("ask", "")),
+            "valuation": extract_number_cr(crm_data.get("valuation", "")),
+            "revenue": crm_data.get("revenue", ""),
+            "sector": crm_data.get("sector", ""),
+            "stage": crm_data.get("stage", ""),
+            "prior_funding": crm_data.get("prior_funding", ""),
+            "description": crm_data.get("description", ""),
+            "source": crm_data.get("source", ""),
+            "assign": crm_data.get("assign", ""),
+            "received_date": crm_data.get("received_date", "")
+        }
 
         headers = {"Content-Type": "application/json"}
         response = requests.post(zoho_webhook_url, json=crm_payload, headers=headers)
@@ -484,7 +481,7 @@ with st.sidebar:
         st.header("🔗 CRM Integration Data")
 
         # Display key CRM fields
-       crm_fields = ['company_name', 'ask', 'revenue', 'valuation', 'sector', 'stage', 'prior_funding', 'source', 'assign', 'description']
+        crm_fields = ['company_name', 'ask', 'revenue', 'valuation', 'sector', 'stage', 'prior_funding', 'source', 'assign', 'description']
         for field in crm_fields:
             if field in st.session_state.crm_data and st.session_state.crm_data[field]:
                 display_value = st.session_state.crm_data[field]
@@ -607,7 +604,6 @@ if file:
     st.success("✅ Pitch deck parsed and CRM data extracted!")
 
     # Show CRM data preview
-   # Show CRM data preview
 if st.session_state.crm_data:
     st.subheader("🔗 CRM Data Preview")
     
