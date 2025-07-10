@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 serpapi_key = os.getenv("SERPAPI_API_KEY")
-zoho_webhook_url = os.getenv("ZOHO_WEBHOOK_URL")
 
 if not openai_api_key or not serpapi_key:
     st.error("❌ Add your OPENAI_API_KEY and SERPAPI_API_KEY in .env")
@@ -303,36 +302,6 @@ def extract_number_cr(value):
         return float(match.group(1))
     return 0.0
 
-def send_to_zoho_webhook(crm_data):
-    """Send data to Zoho webhook"""
-    if not zoho_webhook_url:
-        return
-    
-    try:
-        crm_payload = {
-            "company_name": crm_data.get("company_name", ""),
-            "ask": extract_number_cr(crm_data.get("ask", "")),
-            "valuation": extract_number_cr(crm_data.get("valuation", "")),
-            "revenue": crm_data.get("revenue", ""),
-            "sector": crm_data.get("sector", ""),
-            "stage": crm_data.get("stage", ""),
-            "prior_funding": crm_data.get("prior_funding", ""),
-            "description": crm_data.get("description", ""),
-            "source": crm_data.get("source", ""),
-            "assign": crm_data.get("assign", ""),
-            "received_date": crm_data.get("received_date", "")
-        }
-        
-        headers = {"Content-Type": "application/json"}
-        response = requests.post(zoho_webhook_url, json=crm_payload, headers=headers)
-        
-        if response.status_code == 200:
-            logger.info("✅ Data sent to Zoho successfully")
-        else:
-            logger.warning(f"⚠️ Zoho webhook error: {response.status_code}")
-            
-    except Exception as e:
-        logger.error(f"❌ Zoho webhook failed: {e}")
 
 # Check for specific CRM queries
 def is_specific_crm_query(query):
@@ -700,8 +669,6 @@ if file:
             st.session_state.crm_data = extract_crm_data_with_fallback(text)
             st.session_state.crm_data['received_date'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # Send to Zoho webhook
-            send_to_zoho_webhook(st.session_state.crm_data)
             
             st.success("✅ Pitch deck processed successfully!")
             st.rerun()
