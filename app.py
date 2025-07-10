@@ -190,7 +190,7 @@ def send_to_zoho_webhook(crm_data):
         return
     
     try:
-        st.warning(f"Sending data to webhook: {zoho_webhook_url}")
+        // st.warning(f"Sending data to webhook: {zoho_webhook_url}")
         
         # Preprocess values for Zoho
         crm_payload = {
@@ -599,7 +599,7 @@ if file:
             # ✅ Add received_date (upload date)
             st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d")
 
-            send_to_zoho_webhook(st.session_state.crm_data)
+            // send_to_zoho_webhook(st.session_state.crm_data)
 
     st.success("✅ Pitch deck parsed and CRM data extracted!")
 
@@ -643,7 +643,7 @@ if st.session_state.crm_data:
     
     # Third row - description
     if st.session_state.crm_data.get('description'):
-        st.markdown("**📝 One-liner:**")
+        st.markdown("**📝 Brief Description:**")
         description = st.session_state.crm_data.get('description', '')
         st.markdown(f"<small>{description}</small>", unsafe_allow_html=True)
 # Show selected section
