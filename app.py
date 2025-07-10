@@ -170,7 +170,7 @@ def parse_crm_data(structured_text):
 
     return crm_data
 
-    def extract_number_cr(value):
+def extract_number_cr(value):
     """Convert '₹ 12 Cr Pre-Series A' to 12.0 (float)"""
     if not value:
         return 0.0
@@ -208,7 +208,6 @@ def send_to_zoho_webhook(crm_data):
             logger.warning(f"⚠️ Webhook error: {response.status_code} - {response.text}")
     except Exception as e:
         logger.error(f"❌ Failed to send to Zoho webhook: {e}")
-
 
 # Check if query is asking for specific CRM data
 def is_specific_crm_query(query):
@@ -584,18 +583,15 @@ if file:
         st.session_state.file_uploaded = True
 
         # Extract CRM-specific structured data
-        # Extract CRM-specific structured data
-with st.spinner("🔍 Extracting CRM data..."):
-    crm_structured_text = extract_crm_structured_data(text)
-    st.session_state.structured_data = crm_structured_text
-    st.session_state.crm_data = parse_crm_data(crm_structured_text)
+        with st.spinner("🔍 Extracting CRM data..."):
+            crm_structured_text = extract_crm_structured_data(text)
+            st.session_state.structured_data = crm_structured_text
+            st.session_state.crm_data = parse_crm_data(crm_structured_text)
 
-    # ✅ Add received_date (upload date)
-    st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d")
+            # ✅ Add received_date (upload date)
+            st.session_state.crm_data["received_date"] = datetime.today().strftime("%Y-%m-%d")
 
-    send_to_zoho_webhook(st.session_state.crm_data)
-
-
+            send_to_zoho_webhook(st.session_state.crm_data)
 
     st.success("✅ Pitch deck parsed and CRM data extracted!")
 
