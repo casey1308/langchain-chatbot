@@ -655,6 +655,8 @@ if hasattr(st.session_state, 'selected_section') and st.session_state.selected_s
     st.text_area("Content", st.session_state.sections[st.session_state.selected_section], height=200)
 
 # File Upload (continuation from where it was cut off)
+file = st.file_uploader("📤 Upload your pitch deck (PDF only)", type=["pdf"])
+
 if file:
     with st.spinner("🔄 Processing pitch deck..."):
         file_bytes = file.read()
