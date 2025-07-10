@@ -121,9 +121,12 @@ def extract_crm_structured_data(text):
         ask: [Extract funding amount being sought, e.g., "$2M Series A" or "Not mentioned"]
         revenue: [Extract current revenue figures with specific numbers, e.g., "$500K ARR" or "Not mentioned"]
         valuation: [Extract current valuation with currency and amount, e.g., "$5M pre-money" or "Not mentioned"]
+        sector: [Extract industry/sector, e.g., "FinTech", "HealthTech", "SaaS" or "Not mentioned"]
+        stage: [Extract company stage, e.g., "Pre-Seed", "Seed", "Series A", "Growth" or "Not mentioned"]
+        prior_funding: [Extract previous funding rounds briefly, e.g., "₹2Cr Seed 2023" or "Not mentioned"]
         source: [Always put "Pitch Deck Upload"]
         assign: [Extract founder names and key team members, e.g., "John Doe (CEO), Jane Smith (CTO)" or "Not mentioned"]
-        description: [Brief 2-3 sentence description of what the company does]
+        description: [Brief 1-2 sentence description of what the company does]
         
         INSTRUCTIONS:
         1. Extract SPECIFIC numbers and amounts wherever possible
@@ -473,7 +476,7 @@ with st.sidebar:
         st.header("🔗 CRM Integration Data")
 
         # Display key CRM fields
-        crm_fields = ['company_name', 'ask', 'revenue', 'valuation', 'source', 'assign', 'description']
+        crm_fields = ['company_name', 'ask', 'revenue', 'valuation', 'sector', 'stage', 'prior_funding', 'source', 'assign', 'description']
         for field in crm_fields:
             if field in st.session_state.crm_data and st.session_state.crm_data[field]:
                 display_value = st.session_state.crm_data[field]
@@ -596,21 +599,49 @@ if file:
     st.success("✅ Pitch deck parsed and CRM data extracted!")
 
     # Show CRM data preview
-    if st.session_state.crm_data:
-        st.subheader("🔗 CRM Data Preview")
-        col1, col2, col3 = st.columns(3)
+   # Show CRM data preview
+if st.session_state.crm_data:
+    st.subheader("🔗 CRM Data Preview")
+    
+    # First row - main metrics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        company_name = st.session_state.crm_data.get('company_name', 'Not found')
+        display_name = company_name[:15] + "..." if len(company_name) > 15 else company_name
+        st.metric("Company", display_name)
 
-        with col1:
-            company_name = st.session_state.crm_data.get('company_name', 'Not found')
-            display_name = company_name[:20] + "..." if len(company_name) > 20 else company_name
-            st.metric("Company", display_name)
+    with col2:
+        ask_value = st.session_state.crm_data.get('ask', 'Not found')
+        display_ask = ask_value[:12] + "..." if len(ask_value) > 12 else ask_value
+        st.metric("Ask", display_ask)
 
-        with col2:
-            st.metric("Ask", st.session_state.crm_data.get('ask', 'Not found'))
+    with col3:
+        valuation_value = st.session_state.crm_data.get('valuation', 'Not found')
+        display_valuation = valuation_value[:12] + "..." if len(valuation_value) > 12 else valuation_value
+        st.metric("Valuation", display_valuation)
+    
+    # Second row - additional details
+    col4, col5, col6 = st.columns(3)
+    with col4:
+        sector_value = st.session_state.crm_data.get('sector', 'Not found')
+        display_sector = sector_value[:15] + "..." if len(sector_value) > 15 else sector_value
+        st.metric("Sector", display_sector)
 
-        with col3:
-            st.metric("Valuation", st.session_state.crm_data.get('valuation', 'Not found'))
+    with col5:
+        stage_value = st.session_state.crm_data.get('stage', 'Not found')
+        display_stage = stage_value[:15] + "..." if len(stage_value) > 15 else stage_value
+        st.metric("Stage", display_stage)
 
+    with col6:
+        prior_funding = st.session_state.crm_data.get('prior_funding', 'Not found')
+        display_prior = prior_funding[:12] + "..." if len(prior_funding) > 12 else prior_funding
+        st.metric("Prior Funding", display_prior)
+    
+    # Third row - description
+    if st.session_state.crm_data.get('description'):
+        st.markdown("**📝 One-liner:**")
+        description = st.session_state.crm_data.get('description', '')
+        st.markdown(f"<small>{description}</small>", unsafe_allow_html=True)
 # Show selected section
 if hasattr(st.session_state, 'selected_section') and st.session_state.selected_section:
     st.subheader(f"📖 {st.session_state.selected_section}")
