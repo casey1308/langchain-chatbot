@@ -855,14 +855,13 @@ if st.session_state.page == "Dashboard":
             st.subheader("Quick Actions")
             if st.button("Start Chat with AI", use_container_width=True):
                 st.session_state.page = "AI Chat"
-                st.rerun()
+        
             if st.button("Generate Comprehensive Analysis", use_container_width=True):
                 st.session_state.page = "Comprehensive Analysis"
                 st.session_state.comprehensive_analysis = None # Clear to force generation
-                st.rerun()
+
             if st.button("View Raw Document Sections", use_container_width=True):
                 st.session_state.page = "Document Viewer"
-                st.rerun()
     else:
         st.info("Welcome to Augmento! Please upload a pitch deck PDF using the uploader in the sidebar to get started.")
         st.image("https://via.placeholder.com/700x350?text=Upload+Your+Pitch+Deck+to+Begin", use_container_width=True, caption="Augmento: Your Smart Pitch Evaluator")
@@ -1057,7 +1056,7 @@ elif st.session_state.page == "Document Viewer":
                         st.session_state.chat_history.append({"user": analysis_query, "ai": response, "time": timestamp})
                         st.session_state.active_chat_index = len(st.session_state.chat_history) - 1
                         st.session_state.page = "AI Chat" # Navigate to chat to show response
-                        st.rerun()
+                        
             else:
                 st.markdown("Please select a section from the dropdown to view its content.")
         else:
