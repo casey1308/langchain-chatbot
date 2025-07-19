@@ -9,162 +9,364 @@ from difflib import get_close_matches
 import PyPDF2
 import logging
 import json
+import hashlib
+from typing import Dict, List, Optional, Tuple
 from openai import OpenAIError, RateLimitError, APIError
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging with better formatting
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
-serpapi_key = os.getenv("SERPAPI_API_KEY") # Optional: used for web search
+serpapi_key = os.getenv("SERPAPI_API_KEY")
 
-# --- Environment Variable Checks ---
-if not openai_api_key:
-    st.error("❌ **OPENAI_API_KEY** not found in your environment variables or .env file.")
-    st.error("Please add it to your `.env` file or set it as an environment variable to use Augmento.")
-    st.stop() # Halts the Streamlit app if the key is missing
+if not openai_api_key or not serpapi_key:
+    st.error("❌ Add your OPENAI_API_KEY and SERPAPI_API_KEY in .env")
+    st.stop()
 
-if not serpapi_key:
-    st.warning("⚠️ **SERPAPI_API_KEY** not found. Web search functionality will be disabled.")
-
-# --- Session State Initialization ---
+# Initialize session state with better structure
 def initialize_session_state():
-    """Initializes or resets all necessary session state variables."""
+    """Initialize session state variables with default values"""
     defaults = {
         "chat_history": [],
-        "parsed_doc": None,
+        "parsed_documents": {},  # Store multiple parsed documents
+        "current_doc_id": None,
         "file_uploaded": False,
-        "sections": {},
-        "crm_data": None,
-        "comprehensive_analysis": None, # Stores the generated comprehensive analysis
-        "uploaded_file_name": None,
-        "active_chat_index": None, # To highlight specific chat in history
-        "page": "Dashboard", # Control sidebar navigation: 'Dashboard', 'CRM Management', 'AI Chat', 'Document Viewer'
-        "editable_crm_data": None # To allow editing CRM data in UI
+        "selected_chat_index": None,
+        "show_comprehensive_analysis": False,
+        "show_crm_summary": False,
+        "selected_section": None,
+        "processing_error": None
     }
-    for key, value in defaults.items():
+    
+    for key, default_value in defaults.items():
         if key not in st.session_state:
-            st.session_state[key] = value
+            st.session_state[key] = default_value
 
-initialize_session_state()
+# Document data structure
+class DocumentData:
+    def __init__(self, file_name: str, file_hash: str):
+        self.file_name = file_name
+        self.file_hash = file_hash
+        self.raw_text = ""
+        self.sections = {}
+        self.crm_data = {}
+        self.comprehensive_analysis = None
+        self.processing_status = "pending"
+        self.error_message = None
+        self.created_at = datetime.now().isoformat()
+        self.char_count = 0
 
-# --- Utility Functions ---
+    def to_dict(self):
+        return {
+            'file_name': self.file_name,
+            'file_hash': self.file_hash,
+            'raw_text': self.raw_text,
+            'sections': self.sections,
+            'crm_data': self.crm_data,
+            'comprehensive_analysis': self.comprehensive_analysis,
+            'processing_status': self.processing_status,
+            'error_message': self.error_message,
+            'created_at': self.created_at,
+            'char_count': self.char_count
+        }
 
-def clean_text(text):
-    """Advanced text cleaning for better parsing"""
-    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text) # Remove hyphenated line breaks
-    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text) # Add space between lowercase and uppercase
-    text = re.sub(r"(\d+)([A-Za-z])", r"\1 \2", text) # Add space between numbers and letters
-    text = re.sub(r"([A-Za-z])(\d+)", r"\1 \2", text) # Add space between letters and numbers
-    text = re.sub(r"\n{3,}", "\n\n", text) # Reduce multiple newlines
-    text = re.sub(r"[•◦▪▫‣⁃●■►]", "", text) # Remove common bullet points and special characters
-    text = re.sub(r"\s+", " ", text) # Normalize whitespace
-    text = re.sub(r"\b([A-Z]{2,})\b", lambda m: m.group(1).title(), text) # Fix ALL CAPS (heuristic)
-    text = re.sub(r"\s+([.,:;!?])", r"\1", text) # Fix spacing before punctuation
-    return text.strip()
+# Enhanced text cleaning with better error handling
+def clean_text(text: str) -> str:
+    """Advanced text cleaning for better parsing with error handling"""
+    if not text or not isinstance(text, str):
+        logger.warning("Empty or invalid text provided for cleaning")
+        return ""
+    
+    try:
+        # Remove hyphenated line breaks
+        text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
+        
+        # Fix common PDF artifacts
+        text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+        text = re.sub(r"(\d+)([A-Za-z])", r"\1 \2", text)
+        text = re.sub(r"([A-Za-z])(\d+)", r"\1 \2", text)
+        
+        # Clean up formatting
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(r"[•◦▪▫‣⁃]", "", text)
+        text = re.sub(r"\s+", " ", text)
+        
+        # Fix common OCR errors
+        text = re.sub(r"\b([A-Z]{2,})\b", lambda m: m.group(1).title(), text)
+        text = re.sub(r"\s+([.,:;!?])", r"\1", text)
+        
+        # Remove control characters
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+        
+        return text.strip()
+    
+    except Exception as e:
+        logger.error(f"Error cleaning text: {e}")
+        return text.strip() if text else ""
 
-def extract_pdf_text(file_bytes):
-    """Extract text from PDF with advanced processing"""
+# Robust PDF extraction with multiple fallback methods
+def extract_pdf_text(file_bytes: bytes) -> Tuple[str, bool]:
+    """Extract text from PDF with multiple methods and error handling"""
+    if not file_bytes:
+        logger.error("No file bytes provided")
+        return "", False
+    
+    extraction_methods = [
+        _extract_with_pypdf2,
+        _extract_with_fallback_method
+    ]
+    
+    for method in extraction_methods:
+        try:
+            text, success = method(file_bytes)
+            if success and text.strip():
+                cleaned_text = clean_text(text)
+                if len(cleaned_text) > 100:  # Minimum viable text length
+                    logger.info(f"Successfully extracted {len(cleaned_text)} characters using {method.__name__}")
+                    return cleaned_text, True
+                else:
+                    logger.warning(f"Text too short from {method.__name__}: {len(cleaned_text)} chars")
+        except Exception as e:
+            logger.warning(f"Method {method.__name__} failed: {e}")
+            continue
+    
+    logger.error("All extraction methods failed")
+    return "", False
+
+def _extract_with_pypdf2(file_bytes: bytes) -> Tuple[str, bool]:
+    """Primary extraction method using PyPDF2"""
     try:
         reader = PyPDF2.PdfReader(BytesIO(file_bytes))
+        
+        if len(reader.pages) == 0:
+            return "", False
+        
         full_text = ""
+        successful_pages = 0
+        
         for page_num, page in enumerate(reader.pages):
             try:
-                page_text = page.extract_text() or ""
-                if page_text.strip():
+                page_text = page.extract_text()
+                if page_text and page_text.strip():
                     full_text += f"\n--- PAGE {page_num + 1} ---\n{page_text}\n"
+                    successful_pages += 1
             except Exception as e:
-                logger.warning(f"Error extracting page {page_num + 1}: {e}")
+                logger.warning(f"Failed to extract page {page_num + 1}: {e}")
                 continue
         
-        cleaned_text = clean_text(full_text)
-        logger.info(f"Successfully extracted {len(cleaned_text)} characters from PDF")
-        return cleaned_text
-    except PyPDF2.errors.PdfReadError:
-        logger.error("PDF extraction failed: File might be corrupted or not a valid PDF.")
-        return ""
+        if successful_pages == 0:
+            return "", False
+        
+        return full_text, True
+        
     except Exception as e:
-        logger.error(f"PDF extraction failed: {e}")
-        return ""
+        logger.error(f"PyPDF2 extraction failed: {e}")
+        return "", False
 
-def split_sections(text):
+def _extract_with_fallback_method(file_bytes: bytes) -> Tuple[str, bool]:
+    """Fallback extraction method"""
+    try:
+        # Simple text extraction attempt
+        reader = PyPDF2.PdfReader(BytesIO(file_bytes))
+        text_parts = []
+        
+        for page in reader.pages:
+            try:
+                # Try different extraction methods
+                if hasattr(page, 'extractText'):
+                    text = page.extractText()
+                else:
+                    text = page.extract_text()
+                
+                if text:
+                    text_parts.append(text)
+            except:
+                continue
+        
+        combined_text = "\n".join(text_parts)
+        return combined_text, len(combined_text) > 50
+        
+    except Exception as e:
+        logger.error(f"Fallback extraction failed: {e}")
+        return "", False
+
+# Enhanced section splitting with better pattern detection
+def split_sections(text: str) -> Dict[str, str]:
     """Split text into logical sections with improved detection"""
+    if not text:
+        return {"Executive Summary": "No content available"}
+    
     sections = {"Executive Summary": []}
     current_section = "Executive Summary"
     
-    # Updated Comprehensive heading patterns - ordered from more specific to general
+    # Comprehensive heading patterns with priority order
     heading_patterns = [
-        r"(?i)^(executive\s+summary|overview)",
-        r"(?i)^(company\s+overview|about\s+(?:us|the\s+company)|our\s+story|vision|mission)",
-        r"(?i)^(team|founder|co-founder|founding\s+team|leadership|management\s+team|our\s+team)",
-        r"(?i)^(problem|pain\s+point|market\s+problem|the\s+problem|challenge|customer\s+pain)",
-        r"(?i)^(solution|our\s+solution|product|technology|platform|approach|how\s+it\s+works|product\s+overview)",
-        r"(?i)^(market|market\s+size|market\s+opportunity|addressable\s+market|tam|sam|som|industry\s+analysis)",
-        r"(?i)^(business\s+model|revenue\s+model|monetization|how\s+we\s+make\s+money|pricing)",
-        r"(?i)^(competition|competitive\s+landscape|competitors|market\s+analysis|competitive\s+advantage)",
-        r"(?i)^(traction|growth|metrics|key\s+metrics|performance|milestones|achievements|progress)",
-        r"(?i)^(customers|user\s+base|client\s+base|testimonials|case\s+studies|partnerships)",
-        r"(?i)^(financials|financial\s+projections|revenue|sales|unit\s+economics|burn\s+rate|profitability)",
-        r"(?i)^(funding|investment|ask|series\s+[a-z0-9]|round|capital|valuation|use\s+of\s+funds)",
-        r"(?i)^(cap\s+table|equity|ownership|investor\s+relations|deal\s+terms)",
-        r"(?i)^(roadmap|future\s+plans|strategy|vision|goals|objectives)",
-        r"(?i)^(go[\s-]?to[\s-]?market|marketing|sales\s+strategy|distribution|acquisition\s+strategy)",
-        r"(?i)^(exit\s+strategy|acquisition|ipo|returns|liquidity)",
-        r"(?i)^(appendix|disclaimer|contact\s+us|terms\s+and\s+conditions)"
+        # High-priority patterns (specific startup sections)
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:executive\s+summary|summary)", "Executive Summary"),
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:about\s+(?:us|the\s+company)|company\s+overview|our\s+story)", "Company Overview"),
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:founder|co-founder|founding\s+team|leadership|management\s+team|team|our\s+team)", "Team & Founders"),
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:problem|pain\s+point|market\s+problem|the\s+problem|challenge)", "Problem Statement"),
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:solution|our\s+solution|product|technology|platform|approach)", "Solution & Product"),
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:market|market\s+size|market\s+opportunity|addressable\s+market|tam|sam|som)", "Market Opportunity"),
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:business\s+model|revenue\s+model|monetization|how\s+we\s+make\s+money)", "Business Model"),
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:traction|growth|metrics|key\s+metrics|performance|milestones|achievements)", "Traction & Growth"),
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:competition|competitive\s+landscape|competitors|market\s+analysis)", "Competitive Analysis"),
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:financials|financial\s+projections|revenue|sales|unit\s+economics)", "Financial Projections"),
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:funding|investment|ask|series|round|capital|valuation|use\s+of\s+funds)", "Funding Request"),
+        (r"(?i)^(?:\d+[\.\)]\s*)?(?:roadmap|future\s+plans|strategy|vision|goals|objectives)", "Future Strategy"),
     ]
     
     lines = text.split('\n')
+    
     for line in lines:
         line = line.strip()
         if not line:
             continue
         
-        is_heading = False
-        for pattern in heading_patterns:
-            # Check for patterns and reasonable length to avoid false positives
-            if re.match(pattern, line) and len(line) < 70 and len(line.split()) < 8:
-                potential_section_name = re.sub(r"^\d+[\.\-\s]*", "", line).strip().title()
-                if potential_section_name: # Ensure it's not empty after cleaning
-                    current_section = potential_section_name
-                    sections[current_section] = []
-                    is_heading = True
-                    break
-        
-        # Check for numbered sections (e.g., "1. Introduction", "2. Our Solution") as a separate, strong signal
-        if not is_heading and re.match(r"^\d+\.?\s+[\w\s]+", line) and len(line) < 70 and len(line.split()) < 8:
-            potential_section_name = re.sub(r"^\d+\.?\s+", "", line).strip().title()
-            if potential_section_name:
-                current_section = potential_section_name
+        # Check for heading patterns
+        section_found = False
+        for pattern, section_name in heading_patterns:
+            if re.match(pattern, line) and len(line) < 150:
+                current_section = section_name
                 sections[current_section] = []
-                is_heading = True
+                section_found = True
+                break
         
-        if not is_heading:
+        # Generic numbered sections
+        if not section_found:
+            numbered_match = re.match(r"^\d+[\.\)]\s+([A-Z][^.!?]*)", line)
+            if numbered_match and len(line) < 100:
+                section_title = numbered_match.group(1).strip()
+                current_section = section_title
+                sections[current_section] = []
+                section_found = True
+        
+        if not section_found:
             sections.setdefault(current_section, []).append(line)
     
-    # Post-processing: remove empty sections and join content
+    # Clean up sections and remove empty ones
     cleaned_sections = {}
-    for k, v in sections.items():
-        content = "\n".join(v).strip()
-        if content:
-            cleaned_sections[k] = content
-            
-    # Ensure "Executive Summary" has content or move content from the first real section
-    if "Executive Summary" in cleaned_sections and not cleaned_sections["Executive Summary"]:
-        first_meaningful_section = next((name for name in cleaned_sections if name != "Executive Summary" and cleaned_sections[name]), None)
-        if first_meaningful_section:
-            cleaned_sections["Executive Summary"] = cleaned_sections[first_meaningful_section]
-            logger.info(f"Executive Summary was empty; populated it with content from '{first_meaningful_section}'.")
-            
+    for section_name, content_lines in sections.items():
+        if content_lines:
+            content = "\n".join(content_lines).strip()
+            if content and len(content) > 20:  # Minimum content length
+                cleaned_sections[section_name] = content
+    
+    # Ensure we have at least one section
+    if not cleaned_sections:
+        cleaned_sections["Content"] = text[:2000] + "..." if len(text) > 2000 else text
+    
     return cleaned_sections
 
+# Enhanced CRM data extraction with better error handling
+def extract_crm_structured_data(text: str) -> Optional[str]:
+    """Extract CRM-specific structured data with improved accuracy"""
+    if not text or len(text) < 100:
+        logger.warning("Text too short for meaningful CRM extraction")
+        return None
+    
+    try:
+        llm = ChatOpenAI(
+            model="gpt-4o", 
+            openai_api_key=openai_api_key, 
+            temperature=0,
+            timeout=30,
+            max_retries=2
+        )
+        
+        # Truncate text if too long to avoid token limits
+        if len(text) > 15000:
+            text = text[:15000] + "\n[... content truncated for analysis ...]"
+        
+        extraction_prompt = """
+        Extract the following information from this pitch deck text. Return ONLY the values in the exact format shown.
+        Be precise and extract exact values. If not found, use "Not found".
+        
+        company_name: [Company name]
+        ask: [Funding amount requested with currency, e.g., "$2M", "₹5Cr"]
+        revenue: [Current revenue with currency, e.g., "$100K ARR", "₹50L"]
+        valuation: [Company valuation with currency, e.g., "$10M pre-money"]
+        sector: [Industry sector, e.g., "FinTech", "HealthTech", "EdTech"]
+        stage: [Company stage, e.g., "Seed", "Series A", "Pre-Series A"]
+        prior_funding: [Previous funding with details, e.g., "₹2Cr Seed 2022"]
+        source: Pitch Deck Upload
+        assign: [Founder names and roles, comma-separated]
+        description: [What the company does in 1-2 sentences]
+        
+        CRITICAL INSTRUCTIONS:
+        - Extract exact amounts with currency symbols
+        - Look for keywords like "asking", "raising", "seeking", "need"
+        - Check for revenue mentions with ARR, MRR, monthly, annual
+        - Include founder names and their roles
+        - Keep description factual and concise
+        
+        Text to analyze:
+        """
+        
+        messages = [
+            SystemMessage(content="You are a precise data extraction expert. Extract only the requested information in the exact format specified."),
+            HumanMessage(content=f"{extraction_prompt}\n\n{text}")
+        ]
+        
+        response = llm.invoke(messages)
+        return response.content.strip()
+        
+    except RateLimitError:
+        logger.error("OpenAI API rate limit exceeded")
+        return None
+    except Exception as e:
+        logger.error(f"CRM extraction error: {e}")
+        return None
 
-def default_crm_data():
-    """Returns a dictionary with default 'Not found' values for CRM fields."""
+# Improved CRM data parsing
+def parse_crm_data(structured_text: str) -> Dict[str, str]:
+    """Parse structured text into CRM dictionary with validation"""
+    crm_data = {}
+    
+    if not structured_text:
+        return default_crm_data()
+    
+    required_fields = [
+        'company_name', 'ask', 'revenue', 'valuation', 'sector', 
+        'stage', 'prior_funding', 'source', 'assign', 'description'
+    ]
+    
+    lines = structured_text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if ':' in line:
+            key, value = line.split(':', 1)
+            key = key.strip().lower()
+            value = value.strip()
+            
+            if key in required_fields and value:
+                # Clean up common "not found" variations
+                if value.lower() not in ["not found", "not mentioned", "n/a", "none", "null", ""]:
+                    crm_data[key] = value
+                else:
+                    crm_data[key] = "Not found"
+    
+    # Ensure all required fields exist
+    for field in required_fields:
+        if field not in crm_data:
+            crm_data[field] = "Not found"
+    
+    # Add metadata
+    crm_data['received_date'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    return crm_data
+
+def default_crm_data() -> Dict[str, str]:
+    """Return default CRM data structure"""
     return {
         'company_name': 'Not found',
         'ask': 'Not found',
@@ -174,908 +376,797 @@ def default_crm_data():
         'stage': 'Not found',
         'prior_funding': 'Not found',
         'source': 'Pitch Deck Upload',
-        'assign': 'Not found', # For founder/team names
+        'assign': 'Not found',
         'description': 'Not found',
         'received_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
 
-def normalize_currency_value(value_str):
-    """
-    Normalizes a currency string (e.g., "$6.7M", "₹5Cr", "100K ARR") into a more consistent format.
-    Keeps it as a string for display, but tries to make it cleaner.
-    """
-    if not isinstance(value_str, str):
-        return str(value_str) # Convert numbers to string
-    
-    value_str = value_str.strip().replace(",", "") # Remove commas
-    
-    # Handle currency symbols
-    currency_symbol = ""
-    if '$' in value_str: currency_symbol = '$'
-    elif '₹' in value_str: currency_symbol = '₹'
-    elif '€' in value_str: currency_symbol = '€'
-    elif '£' in value_str: currency_symbol = '£'
-    value_str = value_str.replace('$', '').replace('₹', '').replace('€', '').replace('£', '').strip()
-
-    # Handle common abbreviations (case-insensitive)
-    value_str = re.sub(r'k(?:ilo)?', 'K', value_str, flags=re.IGNORECASE)
-    value_str = re.sub(r'm(?:illion)?', 'M', value_str, flags=re.IGNORECASE)
-    value_str = re.sub(r'b(?:illion)?', 'B', value_str, flags=re.IGNORECASE)
-    value_str = re.sub(r'cr(?:ore)?', 'Cr', value_str, flags=re.IGNORECASE)
-    value_str = re.sub(r'l(?:akh)?', 'L', value_str, flags=re.IGNORECASE)
-    
-    # Extract numerical part
-    num_match = re.match(r'(\d+(?:\.\d+)?)', value_str)
-    if num_match:
-        number = num_match.group(1)
-        # Extract remaining text (units like K, M, B, Cr, ARR, etc.)
-        unit = value_str[num_match.end():].strip()
-        return f"{currency_symbol}{number}{unit}"
-    
-    return f"{currency_symbol}{value_str}" # Return with symbol if no number found, or original
-
-def extract_crm_structured_data(text):
-    """
-    Extracts structured CRM data using the OpenAI LLM.
-    Returns raw LLM output string or None on error.
-    """
+# Enhanced CRM extraction with fallback
+def extract_crm_data_with_fallback(text: str) -> Dict[str, str]:
+    """Main CRM extraction with fallback mechanism"""
     try:
-        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0)
+        structured_text = extract_crm_structured_data(text)
+        if structured_text:
+            crm_data = parse_crm_data(structured_text)
+            if any(v != "Not found" for k, v in crm_data.items() if k != 'received_date'):
+                return crm_data
         
-        extraction_prompt = f"""
-        Extract the following information from this pitch deck text.
-        Return ONLY the key-value pairs in the exact format shown below.
+        # Fallback to regex extraction
+        logger.info("Falling back to regex extraction")
+        return regex_fallback_extraction(text)
         
-        company_name: [Exact Company Name. If not explicit, extract from common headers or context.]
-        ask: [Total funding amount requested, e.g., "$2M", "₹5Cr", "Not found". Include currency and units.]
-        revenue: [Current or latest reported revenue. Specify type if possible (e.g., "$100K ARR", "₹50L Monthly Revenue"). Use "Not found" if not present.]
-        valuation: [Company valuation mentioned, e.g., "$10M pre-money", "₹75Cr post-money". Use "Not found" if not present.]
-        sector: [Industry sector, e.g., "FinTech", "HealthTech", "SaaS", "E-commerce", "AI". Use "Not found" if not clearly stated.]
-        stage: [Company's current stage, e.g., "Seed", "Series A", "Growth", "Pre-Seed", "Product-Market Fit", "Not found".]
-        prior_funding: [Previous funding details, e.g., "₹2Cr Seed in 2022", "$500K Pre-Seed". Use "Not found" if no prior funding or details given.]
-        source: Pitch Deck Upload
-        assign: [Names of Founders/Key Leadership with their primary roles, e.g., "John Doe (CEO), Jane Smith (CTO)". Use "Not found" if not explicit.]
-        description: [A concise, factual 1-2 sentence description of what the company does or its core offering. Avoid marketing fluff. Use "Not found" if unclear.]
-        
-        INSTRUCTIONS:
-        - Read the entire text carefully to find the most accurate and precise values.
-        - **If a piece of information is NOT found, you MUST output "Not found" for that specific field.**
-        - For financial amounts (ask, revenue, valuation, prior_funding), include all currency symbols ($ ₹ € £) and magnitude units (K, M, B, Cr, L).
-        - Ensure numerical values are exact from the text, including decimals.
-        - For 'description', focus on the core business, not aspirations or future plans.
-        - Be extremely literal with the provided text for extraction.
-        
-        Text to analyze:
-        """
-        
-        messages = [
-            SystemMessage(content="You are an expert data extraction bot for VC pitch decks. Extract exactly the requested information in the specified format."),
-            HumanMessage(content=f"{extraction_prompt}\n\n{text}")
-        ]
-        
-        response = llm.invoke(messages)
-        return response.content.strip()
-    
-    except RateLimitError:
-        logger.warning("OpenAI Rate Limit Exceeded during CRM extraction.")
-        st.error("Too many requests for CRM extraction. Please wait a moment and try again.")
-        return None
-    except APIError as e:
-        logger.error(f"OpenAI API Error during CRM extraction: {e}")
-        st.error(f"An API error occurred during CRM extraction: {e.args[0]}")
-        return None
     except Exception as e:
-        logger.error(f"Unexpected error during CRM extraction: {e}")
-        st.error(f"An unexpected error occurred during CRM extraction: {e}")
+        logger.error(f"CRM extraction failed: {e}")
+        return default_crm_data()
+
+def regex_fallback_extraction(text: str) -> Dict[str, str]:
+    """Fallback extraction using regex patterns"""
+    crm_data = default_crm_data()
+    
+    if not text:
+        return crm_data
+    
+    # Enhanced patterns for better extraction
+    patterns = {
+        'ask': [
+            r'(?:seeking|raising|ask|asking|need|require|looking\s+for).*?[₹$]?\s*(\d+(?:\.\d+)?)\s*(million|crore|lakh|[KMBCr]+)',
+            r'funding.*?[₹$]?\s*(\d+(?:\.\d+)?)\s*(million|crore|lakh|[KMBCr]+)',
+            r'investment.*?[₹$]?\s*(\d+(?:\.\d+)?)\s*(million|crore|lakh|[KMBCr]+)',
+            r'[₹$]\s*(\d+(?:\.\d+)?)\s*(million|crore|lakh|[KMBCr]+).*?(?:funding|investment|ask)'
+        ],
+        'revenue': [
+            r'revenue.*?[₹$]?\s*(\d+(?:\.\d+)?)\s*(million|crore|lakh|[KMBCr]+)',
+            r'sales.*?[₹$]?\s*(\d+(?:\.\d+)?)\s*(million|crore|lakh|[KMBCr]+)',
+            r'(\d+(?:\.\d+)?)\s*(million|crore|lakh|[KMBCr]+)\s*(?:ARR|MRR|annual|monthly|revenue)',
+            r'[₹$]\s*(\d+(?:\.\d+)?)\s*(million|crore|lakh|[KMBCr]+).*?revenue'
+        ],
+        'valuation': [
+            r'valuation.*?[₹$]?\s*(\d+(?:\.\d+)?)\s*(million|crore|lakh|[KMBCr]+)',
+            r'valued\s+at.*?[₹$]?\s*(\d+(?:\.\d+)?)\s*(million|crore|lakh|[KMBCr]+)',
+            r'(?:pre|post)[-\s]money.*?[₹$]?\s*(\d+(?:\.\d+)?)\s*(million|crore|lakh|[KMBCr]+)'
+        ],
+        'company_name': [
+            r'(?:company|startup|firm).*?(?:name|called)\s+(?:is\s+)?([A-Z][A-Za-z\s]+)',
+            r'^([A-Z][A-Za-z\s]{2,30})\s+(?:is\s+a|provides|offers|specializes)',
+            r'introducing\s+([A-Z][A-Za-z\s]{2,30})'
+        ]
+    }
+    
+    for field, field_patterns in patterns.items():
+        for pattern in field_patterns:
+            try:
+                match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+                if match:
+                    if field == 'company_name':
+                        crm_data[field] = match.group(1).strip()
+                    else:
+                        value = match.group(1)
+                        unit = match.group(2) if len(match.groups()) > 1 else ""
+                        crm_data[field] = f"${value}{unit}" if unit else f"${value}"
+                    break
+            except Exception as e:
+                logger.warning(f"Regex pattern failed for {field}: {e}")
+                continue
+    
+    return crm_data
+
+# File hash generation for caching
+def generate_file_hash(file_bytes: bytes) -> str:
+    """Generate hash for file to enable caching"""
+    return hashlib.md5(file_bytes).hexdigest()
+
+# Main document processing function
+def process_document(file_bytes: bytes, file_name: str) -> Optional[str]:
+    """Process document with comprehensive error handling and caching"""
+    file_hash = generate_file_hash(file_bytes)
+    
+    # Check if already processed
+    if file_hash in st.session_state.parsed_documents:
+        logger.info(f"Document {file_name} already processed (hash: {file_hash})")
+        st.session_state.current_doc_id = file_hash
+        st.session_state.file_uploaded = True
+        return file_hash
+    
+    # Create new document data
+    doc_data = DocumentData(file_name, file_hash)
+    
+    try:
+        # Extract text
+        with st.spinner("🔄 Extracting text from PDF..."):
+            raw_text, success = extract_pdf_text(file_bytes)
+            
+            if not success or len(raw_text) < 100:
+                doc_data.processing_status = "failed"
+                doc_data.error_message = "Failed to extract meaningful text from PDF"
+                st.session_state.parsed_documents[file_hash] = doc_data
+                return None
+            
+            doc_data.raw_text = raw_text
+            doc_data.char_count = len(raw_text)
+        
+        # Split into sections
+        with st.spinner("🔄 Analyzing document structure..."):
+            doc_data.sections = split_sections(raw_text)
+            
+            if not doc_data.sections:
+                doc_data.sections = {"Content": raw_text[:2000]}
+        
+        # Extract CRM data
+        with st.spinner("🔄 Extracting CRM data..."):
+            doc_data.crm_data = extract_crm_data_with_fallback(raw_text)
+        
+        doc_data.processing_status = "completed"
+        st.session_state.parsed_documents[file_hash] = doc_data
+        st.session_state.current_doc_id = file_hash
+        st.session_state.file_uploaded = True
+        
+        logger.info(f"Successfully processed {file_name} ({doc_data.char_count} chars, {len(doc_data.sections)} sections)")
+        return file_hash
+        
+    except Exception as e:
+        logger.error(f"Document processing failed: {e}")
+        doc_data.processing_status = "failed"
+        doc_data.error_message = str(e)
+        st.session_state.parsed_documents[file_hash] = doc_data
         return None
 
-def parse_crm_data(structured_text):
-    """
-    Parses the structured text output from extract_crm_structured_data into a dictionary.
-    Handles missing fields by assigning 'Not found'.
-    Also applies normalization to financial values.
-    """
-    crm_data = default_crm_data()
-    if not structured_text:
-        return crm_data
+# Get current document data
+def get_current_doc() -> Optional[DocumentData]:
+    """Get current document data"""
+    if st.session_state.current_doc_id and st.session_state.current_doc_id in st.session_state.parsed_documents:
+        return st.session_state.parsed_documents[st.session_state.current_doc_id]
+    return None
 
-    lines = structured_text.split('\n')
-    for line in lines:
-        line = line.strip()
-        if ':' in line:
-            key, value = line.split(':', 1)
-            key = key.strip().lower()
-            value = value.strip()
-            
-            # Use get_close_matches for robustness against slight LLM variations in key names
-            close_match_key = get_close_matches(key, crm_data.keys(), n=1, cutoff=0.8)
-            if close_match_key:
-                crm_data_key = close_match_key[0]
-                
-                # Apply normalization for specific financial fields
-                if crm_data_key in ['ask', 'revenue', 'valuation', 'prior_funding']:
-                    processed_value = normalize_currency_value(value)
-                else:
-                    processed_value = value
-                
-                crm_data[crm_data_key] = processed_value if processed_value and processed_value.lower() not in ["not found", "not mentioned", "n/a", "no information"] else "Not found"
-    
-    return crm_data
-
-def regex_fallback_extraction(text):
-    """
-    Fallback extraction using robust regex patterns for key financial figures.
-    This is less reliable than LLM but provides a safety net.
-    """
-    fallback_data = default_crm_data()
-    text_lower = text.lower() # Work with lowercase for regex
-
-    # Company Name: Often in the first 1000 characters, capitalized, could be a common entity
-    # This is a very basic heuristic, LLM is better for company name.
-    company_name_match = re.search(r'^[A-Z][a-zA-Z0-9\s&.,-]{3,60}(?:\n|$)', text, re.MULTILINE)
-    if company_name_match:
-        fallback_data['company_name'] = company_name_match.group(0).strip()
-    
-    # Pattern for Ask (Funding)
-    ask_patterns = [
-        r'(?:seeking|raising|target|funding|investment|ask|we are seeking)\s+(?:of)?\s*([₹$€£]?\s*\d[\d,\.]*\s*(?:[kmbcrt]|\s*thousand|\s*million|\s*billion|\s*crore|\s*lakh)?(?:[a-z]{0,2})?)', # Handles "$10M", "10 million", "₹5Cr"
-        r'(?:a|our)\s+(?:seed|series\s+[a-z])\s*(?:round)?\s*(?:of|for)\s*([₹$€£]?\s*\d[\d,\.]*\s*(?:[kmbcrt]|\s*thousand|\s*million|\s*billion|\s*crore|\s*lakh)?)',
-        r'(?:looking to raise|require)\s*(?:up to)?\s*([₹$€£]?\s*\d[\d,\.]*\s*(?:[kmbcrt]|\s*thousand|\s*million|\s*billion|\s*crore|\s*lakh)?)'
-    ]
-    for pattern in ask_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            fallback_data['ask'] = normalize_currency_value(match.group(1))
-            break
-            
-    # Pattern for Revenue
-    revenue_patterns = [
-        r'(?:current|annual|monthly|projected)\s*(?:revenue|sales|income|earnings|arr|mrr|grr|nrr)\s*(?:of)?\s*([₹$€£]?\s*\d[\d,\.]*\s*(?:[kmbcrt]|\s*thousand|\s*million|\s*billion|\s*crore|\s*lakh)?(?:[\s]*arr|mrr)?)',
-        r'([₹$€£]?\s*\d[\d,\.]*\s*(?:[kmbcrt]|\s*thousand|\s*million|\s*billion|\s*crore|\s*lakh)?)\s*(?:annually|monthly)\s*(?:revenue|sales)?',
-        r'last year revenue\s*([₹$€£]?\s*\d[\d,\.]*\s*(?:[kmbcrt]|\s*thousand|\s*million|\s*billion|\s*crore|\s*lakh)?)'
-    ]
-    for pattern in revenue_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            fallback_data['revenue'] = normalize_currency_value(match.group(1))
-            break
-
-    # Pattern for Valuation
-    valuation_patterns = [
-        r'(?:company\s*)?valuation\s*(?:of)?\s*([₹$€£]?\s*\d[\d,\.]*\s*(?:[kmbcrt]|\s*thousand|\s*million|\s*billion|\s*crore|\s*lakh)?(?:[\s]*(?:pre|post)[\s-]?money)?)',
-        r'(?:is\s*)?valued\s+at\s*([₹$€£]?\s*\d[\d,\.]*\s*(?:[kmbcrt]|\s*thousand|\s*million|\s*billion|\s*crore|\s*lakh)?)',
-        r'(?:pre|post)[\s-]?money\s*(?:valuation)?\s*(?:of)?\s*([₹$€£]?\s*\d[\d,\.]*\s*(?:[kmbcrt]|\s*thousand|\s*million|\s*billion|\s*crore|\s*lakh)?)'
-    ]
-    for pattern in valuation_patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            fallback_data['valuation'] = normalize_currency_value(match.group(1))
-            break
-            
-    return fallback_data
-
-def extract_crm_data_with_fallback(text):
-    """
-    Orchestrates CRM data extraction, prioritizing LLM and falling back to regex.
-    """
-    crm_data = default_crm_data()
-    
-    # Try LLM extraction first
-    structured_text_llm = extract_crm_structured_data(text)
-    if structured_text_llm:
-        crm_data_llm = parse_crm_data(structured_text_llm)
-        # Only update if LLM provides a non-empty result for a field that wasn't 'Not found' from LLM
-        for key, value in crm_data_llm.items():
-            if value != 'Not found':
-                crm_data[key] = value
-    
-    # Fallback to regex for specific fields if LLM returned "Not found" or no info
-    fallback_candidates = ['company_name', 'ask', 'revenue', 'valuation']
-    if any(crm_data.get(field) == 'Not found' for field in fallback_candidates):
-        logger.info("Some CRM fields were 'Not found' by LLM, attempting regex fallback.")
-        regex_data = regex_fallback_extraction(text)
-        for field in fallback_candidates:
-            if crm_data.get(field) == 'Not found' and regex_data.get(field) != 'Not found':
-                crm_data[field] = regex_data[field]
-                logger.info(f"Filled '{field}' with regex fallback: {crm_data[field]}")
-                
-    return crm_data
-
-def is_specific_crm_query(query):
-    """Identifies if a user query is asking for a specific CRM field."""
+# Enhanced query processing
+def is_specific_crm_query(query: str) -> Optional[str]:
+    """Identify specific CRM field queries"""
     query_lower = query.lower()
+    
     specific_keywords = {
-        'company_name': ['company name', 'what company', 'name of company', 'about the company'],
-        'ask': ['ask', 'funding', 'investment', 'raise', 'capital', 'seeking', 'round', 'how much money'],
-        'revenue': ['revenue', 'sales', 'income', 'earnings', 'arr', 'mrr'],
-        'valuation': ['valuation', 'worth', 'valued', 'pre-money', 'post-money'],
-        'sector': ['sector', 'industry', 'domain'],
-        'stage': ['stage', 'development stage', 'current stage'],
-        'prior_funding': ['prior funding', 'previous funding', 'past investments', 'funding history'],
-        'assign': ['founder', 'ceo', 'team', 'who founded', 'leadership', 'management', 'team members', 'executive team'],
-        'description': ['what do they do', 'what does the company do', 'business', 'product', 'service', 'company description']
+        'ask': ['ask', 'funding', 'investment', 'raise', 'capital', 'seeking', 'round', 'money'],
+        'founder': ['founder', 'ceo', 'team', 'who founded', 'leadership', 'management', 'started'],
+        'revenue': ['revenue', 'sales', 'income', 'earnings', 'arr', 'mrr', 'money made'],
+        'valuation': ['valuation', 'worth', 'valued', 'pre-money', 'post-money', 'value'],
+        'company': ['company name', 'what company', 'name of company', 'startup name'],
+        'description': ['what do they do', 'what does the company do', 'business', 'product', 'service'],
+        'sector': ['sector', 'industry', 'vertical', 'market', 'space'],
+        'stage': ['stage', 'series', 'round', 'funding stage']
     }
+    
     for field, keywords in specific_keywords.items():
         if any(keyword in query_lower for keyword in keywords):
             return field
+    
     return None
 
-def generate_crm_response(field, crm_data):
-    """Generates a focused response for a specific CRM field query."""
+def generate_crm_response(field: str, crm_data: Dict[str, str]) -> str:
+    """Generate focused response for CRM field queries"""
     if not crm_data:
         return "No CRM data available. Please upload a pitch deck first."
     
-    value = crm_data.get(field, "Not found")
-    display_field_name = field.replace('_', ' ').title() # Make it human-readable
+    field_mapping = {
+        'company': 'company_name',
+        'founder': 'assign',
+        'ask': 'ask',
+        'revenue': 'revenue',
+        'valuation': 'valuation',
+        'description': 'description',
+        'sector': 'sector',
+        'stage': 'stage'
+    }
+    
+    crm_field = field_mapping.get(field, field)
+    value = crm_data.get(crm_field, "Not found")
     
     if not value or value == "Not found":
-        return f"**{display_field_name}:** Not mentioned explicitly in the pitch deck or could not be extracted by AI."
+        return f"**{field.title()}:** Not mentioned in the pitch deck."
     
-    return f"**{display_field_name}:** {value}"
+    return f"**{field.title()}:** {value}"
 
-def extract_comprehensive_analysis(text):
-    """
-    Generates a comprehensive VC analysis using the OpenAI LLM.
-    Caches the result in session state.
-    """
-    try:
-        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.2) # Slightly higher temperature for more creative analysis
-        
-        analysis_prompt = """
-        Conduct a comprehensive VC analysis of this pitch deck. Focus on providing actionable insights for an investor.
-        Structure your analysis using Markdown headings and bullet points as follows:
-        
-        ## EXECUTIVE SUMMARY
-        - Briefly summarize the investment opportunity in 2-3 sentences.
-        - List 3-5 key strengths of the company/pitch.
-        - List 3-5 key concerns or weaknesses that an investor should be aware of.
-        - Provide a clear Investment Recommendation: **"Strong Buy"**, **"Consider"**, or **"Pass"**. Justify it briefly (1-2 sentences).
-
-        ## COMPANY & TEAM ANALYSIS
-        - **Business Model & Value Proposition:** Clearly explain what they do, how they plan to generate revenue, and what unique value they offer.
-        - **Founders & Team:** Assess the team's relevant experience, expertise, and their suitability to execute the plan. Highlight any gaps.
-        - **Competitive Positioning:** How do they differentiate from current and potential competitors? What are their sustainable competitive advantages?
-
-        ## MARKET OPPORTUNITY
-        - **Market Size & Growth:** Describe the target market, its current size (e.g., TAM, SAM, SOM if mentioned), and projected growth potential.
-        - **Market Timing & Trends:** Is this the right time for this solution? What macro or micro trends are they leveraging or impacted by?
-        - **Go-to-Market Strategy:** Detail their strategy for acquiring customers and scaling distribution. Is it effective and cost-efficient?
-
-        ## FINANCIAL ANALYSIS (if data is present)
-        - **Revenue & Traction:** Summarize current revenue, growth metrics (e.g., ARR, MRR, user growth), and key historical milestones achieved.
-        - **Unit Economics & Scalability:** Discuss the profitability per unit/customer. Is the business model scalable? What are the key cost drivers?
-        - **Funding & Use of Funds:** What specific amount are they asking for, and how will the capital be utilized (e.g., hiring, marketing, R&D)? Is the ask justified?
-
-        ## RISK ASSESSMENT
-        - **Market & Competitive Risks:** External threats (e.g., market saturation, new disruptive entrants, changing customer preferences).
-        - **Execution & Team Risks:** Internal challenges (e.g., ability to deliver on roadmap, team cohesion, key person dependency).
-        - **Financial & Regulatory Risks:** Dependency on future funding, potential cash burn issues, legal/compliance hurdles.
-
-        ## INVESTMENT DECISION & NEXT STEPS
-        - **Key Questions for Due Diligence:** List 3-5 critical, probing questions an investor should ask in a follow-up.
-        - **Recommended Next Steps:** What specific action should the investor take next (e.g., "Schedule follow-up call with founders to discuss financials", "Request detailed financial model and cap table", "Pass for now due to market saturation")?
-        
-        Be specific, reference information from the pitch deck where possible, and maintain a professional VC tone.
-        """
-        
-        messages = [
-            SystemMessage(content="You are an expert Venture Capital Analyst. Provide thorough, insightful, and actionable investment analysis based solely on the provided pitch deck text. Use clear markdown formatting."),
-            HumanMessage(content=f"{analysis_prompt}\n\nPitch Deck Text:\n{text}")
-        ]
-        
-        response = llm.invoke(messages)
-        return response.content
-    
-    except RateLimitError:
-        logger.warning("OpenAI Rate Limit Exceeded during comprehensive analysis.")
-        return "Error: Rate limit exceeded. Please try again in a few minutes."
-    except APIError as e:
-        logger.error(f"OpenAI API Error during comprehensive analysis: {e}")
-        return f"Error: Failed to generate analysis due to an OpenAI API issue: {e.args[0]}. Please check your API key."
-    except Exception as e:
-        logger.error(f"Unexpected error during comprehensive analysis: {e}")
-        return f"Error: Could not generate comprehensive analysis due to an unexpected issue: {str(e)}"
-
-def match_section_content(query, sections):
-    """
-    Finds the most relevant section content for a given query.
-    Prioritizes direct matches, then fuzzy matches on section names, then content search.
-    """
+# Enhanced section matching
+def match_section(query: str, sections: Dict[str, str], crm_data: Optional[Dict] = None) -> str:
+    """Match query to relevant sections with improved accuracy"""
     query_lower = query.lower()
     
-    # Try direct match with section names first
-    for section_name, content in sections.items():
-        if query_lower in section_name.lower():
-            return content
-
-    # Use a predefined mapping for common queries to section types
-    keyword_to_section_map = {
-        "founder": ["founder", "team", "leadership", "management"],
-        "valuation": ["valuation", "funding", "investment", "financials"],
-        "ask": ["ask", "funding", "investment"],
-        "market": ["market", "opportunity"],
-        "problem": ["problem"],
-        "solution": ["solution", "product", "technology"],
-        "traction": ["traction", "revenue", "growth", "metrics", "financials"],
-        "competition": ["competition"],
-        "business model": ["business model", "revenue model"],
-        "go-to-market": ["go-to-market", "marketing", "strategy"]
+    # First check if it's a CRM-specific query
+    if crm_data:
+        crm_field = is_specific_crm_query(query)
+        if crm_field:
+            return generate_crm_response(crm_field, crm_data)
+    
+    # Section keyword mapping
+    section_keywords = {
+        "founder": ["founder", "team", "leadership", "management", "ceo", "started"],
+        "problem": ["problem", "pain", "challenge", "issue", "difficulty"],
+        "solution": ["solution", "product", "technology", "platform", "approach"],
+        "market": ["market", "opportunity", "size", "tam", "sam", "som", "addressable"],
+        "traction": ["traction", "growth", "metrics", "performance", "achievement"],
+        "financial": ["financial", "revenue", "sales", "projection", "economics"],
+        "competition": ["competition", "competitor", "competitive", "landscape"],
+        "funding": ["funding", "investment", "ask", "capital", "valuation", "money"],
+        "business": ["business", "model", "monetization", "revenue model"],
+        "strategy": ["strategy", "roadmap", "future", "plan", "vision", "goal"]
     }
     
-    # Check if query contains keywords directly mapping to known section types
-    for key_phrase, target_section_keywords in keyword_to_section_map.items():
-        if key_phrase in query_lower:
-            for target_keyword in target_section_keywords:
-                for section_name, content in sections.items():
-                    if target_keyword in section_name.lower():
-                        return content # Return the first good section match
-
-    # Fuzzy matching against all section names as a fallback
-    section_names_lower = [k.lower() for k in sections.keys()]
-    matches = get_close_matches(query_lower, section_names_lower, n=1, cutoff=0.6)
+    # Find best matching section
+    best_match = ""
+    best_score = 0
+    
+    for category, keywords in section_keywords.items():
+        for keyword in keywords:
+            if keyword in query_lower:
+                # Look for sections containing this keyword
+                for section_name, section_content in sections.items():
+                    if keyword in section_name.lower() or keyword in section_content.lower():
+                        score = section_content.lower().count(keyword)
+                        if score > best_score:
+                            best_match = section_content
+                            best_score = score
+    
+    if best_match:
+        return best_match
+    
+    # Fallback: fuzzy matching on section names
+    section_names = list(sections.keys())
+    matches = get_close_matches(query_lower, [name.lower() for name in section_names], n=1, cutoff=0.3)
+    
     if matches:
-        matched_section_name = next(k for k in sections.keys() if k.lower() == matches[0])
-        return sections[matched_section_name]
+        for name in section_names:
+            if name.lower() == matches[0]:
+                return sections[name]
     
-    # If no section name matches, perform a simple content search (last resort)
-    for section_name, content in sections.items():
-        if query_lower in content.lower():
-            snippet_start = max(0, content.lower().find(query_lower) - 200)
-            snippet_end = min(len(content), snippet_start + len(query_lower) + 300)
-            return f"**Found relevant information in the '{section_name}' section:**\n\n...{content[snippet_start:snippet_end]}..."
+    # Last resort: return all sections combined (truncated)
+    all_content = "\n\n".join([f"**{name}:**\n{content}" for name, content in sections.items()])
+    if len(all_content) > 3000:
+        all_content = all_content[:3000] + "\n\n[Content truncated...]"
+    
+    return all_content if all_content else "No relevant information found in the pitch deck."
 
-    return "The requested information could not be found in the pitch deck sections."
-
-def search_serpapi(query):
-    """
-    Performs a web search using SERP API and summarizes the results with LLM.
-    """
-    if not serpapi_key:
-        return "Web search is disabled. Please configure your SERPAPI_API_KEY in the `.env` file."
+# Enhanced chat function with better error handling
+def chat_with_ai(user_input: str) -> str:
+    """Handle AI chat interactions with comprehensive error handling"""
     try:
-        params = {
-            "engine": "google",
-            "q": query,
-            "api_key": serpapi_key,
-            "num": 5
-        }
-        r = requests.get("https://serpapi.com/search", params=params)
-        r.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
-        data = r.json()
+        doc_data = get_current_doc()
+        if not doc_data or doc_data.processing_status != "completed":
+            return "Please upload and process a pitch deck first to start the conversation."
         
-        if "organic_results" not in data or not data["organic_results"]:
-            return "No relevant web search results found."
-        
-        combined_snippets = []
-        for res in data["organic_results"]:
-            title = res.get("title", "No Title")
-            snippet = res.get("snippet", "No Snippet")
-            link = res.get("link", "#")
-            combined_snippets.append(f"Title: {title}\nSnippet: {snippet}\nSource: {link}")
-        
-        full_search_context = "\n\n".join(combined_snippets[:3])
-        
-        llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
-        
-        if any(x in query.lower() for x in ["founder", "background", "education", "experience", "linkedin", "team"]):
-            search_prompt = f"""Summarize the following search results to provide a comprehensive background for a founder/team, covering:
-            - Educational background
-            - Professional experience
-            - Notable achievements/ventures
-            - Industry expertise
+        # Handle web search requests
+        if any(term in user_input.lower() for term in ["search", "web", "google", "internet", "background", "linkedin"]):
+            if not serpapi_key:
+                return "Web search is not available. SERPAPI_KEY not configured."
             
-            Search Results:\n{full_search_context}"""
-        else:
-            search_prompt = f"""Summarize the following web search results concisely for a VC analysis context.
-            Focus on key insights directly relevant to the query '{query}'.
+            search_query = re.sub(r'\b(search|web|google|internet)\b', '', user_input, flags=re.IGNORECASE).strip()
+            if doc_data.crm_data.get('company_name') != 'Not found':
+                search_query = f"{doc_data.crm_data['company_name']} {search_query}"
             
-            Search Results:\n{full_search_context}"""
+            search_result = search_serpapi(search_query)
+            return f"🔍 **Web Search Results:**\n\n{search_result}"
         
-        response = llm.invoke(search_prompt)
-        return f"🔍 **Web Search Results for '{query}':**\n\n{response.content.strip()}"
-    
-    except requests.exceptions.RequestException as req_err:
-        logger.error(f"SERP API request failed: {req_err}")
-        return f"❌ Web search request failed: {req_err}. Please check your internet connection or SERP API key."
-    except Exception as e:
-        logger.error(f"Web search failed unexpectedly: {str(e)}")
-        return f"❌ Web search failed unexpectedly: {str(e)}"
-
-# --- Main Chat Orchestration Function ---
-def chat_with_ai(user_input):
-    """
-    Orchestrates AI responses based on user input, leveraging document analysis,
-    CRM data, and external web search.
-    """
-    if not st.session_state.file_uploaded:
-        return "Please upload a pitch deck first to start analyzing."
-
-    user_input_lower = user_input.lower()
-
-    # 1. Handle specific CRM data queries
-    crm_field = is_specific_crm_query(user_input_lower)
-    if crm_field:
-        return generate_crm_response(crm_field, st.session_state.crm_data)
-    
-    # 2. Handle Comprehensive Analysis request
-    if "comprehensive analysis" in user_input_lower or "investment recommendation" in user_input_lower or "full report" in user_input_lower:
-        if st.session_state.comprehensive_analysis:
-            return "Here is the comprehensive VC analysis already generated:\n\n" + st.session_state.comprehensive_analysis
-        else:
-            # If not yet generated, trigger it
-            with st.spinner("Generating comprehensive analysis..."):
-                st.session_state.comprehensive_analysis = extract_comprehensive_analysis(st.session_state.parsed_doc)
-                if st.session_state.comprehensive_analysis.startswith("Error"):
-                     return st.session_state.comprehensive_analysis
-                return "Analysis generated. Please see the 'Comprehensive Analysis' page for details.\n\n" + st.session_state.comprehensive_analysis[:500] + "..." # Return snippet in chat
-            
-
-    # 3. Handle Web Search requests
-    if any(term in user_input_lower for term in ["search web for", "google for", "find info on", "external search", "linkedin for", "background of", "web search"]):
-        search_query_base = user_input_lower.replace("search web for", "").replace("google for", "").replace("find info on", "").replace("external search", "").replace("linkedin for", "").replace("background of", "").replace("web search", "").strip()
+        # Get relevant content
+        relevant_content = match_section(user_input, doc_data.sections, doc_data.crm_data)
         
-        if not search_query_base: # If user just said "web search", prompt for more info
-            return "What would you like me to search the web for? Please be specific (e.g., 'web search for founder's linkedin')."
+        # Check if it's a specific CRM query
+        crm_field = is_specific_crm_query(user_input)
+        if crm_field:
+            return generate_crm_response(crm_field, doc_data.crm_data)
+        
+        # Generate AI response
+        llm = ChatOpenAI(
+            model="gpt-4o", 
+            openai_api_key=openai_api_key, 
+            temperature=0.1,
+            timeout=30
+        )
+        
+        # CONTINUING FROM WHERE THE CODE LEFT OFF...
+# Complete the chat_with_ai function context preparation
 
-        # Augment search query with company name if available
-        if st.session_state.crm_data and st.session_state.crm_data.get('company_name') != 'Not found':
-            search_query = f"{st.session_state.crm_data['company_name']} {search_query_base}"
-        else:
-            search_query = search_query_base
+        # Prepare context
+        context = f"""
+        You are analyzing a pitch deck for: {doc_data.crm_data.get('company_name', 'Unknown Company')}
         
-        return search_serpapi(search_query)
-
-    # 4. General document-based questions
-    try:
-        llm = ChatOpenai(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.1)
+        Company Details:
+        - Ask: {doc_data.crm_data.get('ask', 'Not specified')}
+        - Revenue: {doc_data.crm_data.get('revenue', 'Not specified')}
+        - Valuation: {doc_data.crm_data.get('valuation', 'Not specified')}
+        - Sector: {doc_data.crm_data.get('sector', 'Not specified')}
+        - Stage: {doc_data.crm_data.get('stage', 'Not specified')}
+        - Team: {doc_data.crm_data.get('assign', 'Not specified')}
+        - Description: {doc_data.crm_data.get('description', 'Not specified')}
         
-        relevant_content = match_section_content(user_input, st.session_state.sections)
-        
-        system_message_content = """
-        You are Augmento AI, a specialized assistant for Venture Capitalists, analyzing pitch decks.
-        Answer the user's question precisely and concisely, using information found *only* in the pitch deck.
-        If the information is not explicitly present in the provided document sections or the general document text, clearly state that you couldn't find it in the deck.
-        Avoid making up information. Be professional and to the point.
+        Based on the pitch deck content, provide accurate, helpful responses. Be concise but informative.
+        If the user asks about specific metrics or information not clearly stated, mention what's available vs. what's missing.
         """
         
-        human_message_content = f"""
-        User Question: {user_input}
-        
-        Relevant Pitch Deck Content:
-        ---
-        {relevant_content}
-        ---
-        
-        Based on the "Relevant Pitch Deck Content" provided above, and the full document context, answer the user's question.
-        """
-        
+        # Prepare messages for the AI
         messages = [
-            SystemMessage(content=system_message_content),
-            HumanMessage(content=human_message_content)
+            SystemMessage(content=context),
+            HumanMessage(content=f"User question: {user_input}\n\nRelevant content from pitch deck:\n{relevant_content}")
         ]
         
         response = llm.invoke(messages)
         return response.content
         
     except RateLimitError:
-        logger.warning("OpenAI Rate Limit Exceeded during chat.")
-        return "❌ I'm currently experiencing high demand. Please try asking your question again in a moment."
+        return "⏰ API rate limit reached. Please wait a moment and try again."
     except APIError as e:
-        logger.error(f"OpenAI API error in chat: {e}")
-        return f"❌ An OpenAI API error occurred: {e.args[0]}. Please ensure your API key is valid and not expired."
+        logger.error(f"OpenAI API error: {e}")
+        return f"❌ AI service error: {str(e)}"
     except Exception as e:
-        logger.error(f"Chat processing failed: {e}")
-        return f"❌ Sorry, I couldn't process that request. An unexpected error occurred: {str(e)}"
+        logger.error(f"Chat function error: {e}")
+        return f"❌ Error processing your question: {str(e)}"
 
-# --- Streamlit UI Configuration ---
+# This contains the remaining portions typically needed for a complete Streamlit pitch deck analyzer
 
-st.set_page_config(
-    page_title="Augmento - Smart Pitch Evaluator",
-    page_icon="🚀",
-    layout="wide",
-    initial_sidebar_state="expanded" # Start with sidebar expanded
-)
-
-# Custom CSS for a more polished look
-st.markdown("""
-<style>
-    .stApp {
-        background-color: #0c1015; /* Darker background */
-        color: #e0e0e0; /* Lighter text */
-    }
-    .stButton > button {
-        background-color: #2e7d32; /* Green for primary actions */
-        color: white;
-        border-radius: 8px;
-        border: none;
-        padding: 10px 20px;
-        font-weight: bold;
-        transition: all 0.2s ease-in-out;
-    }
-    .stButton > button:hover {
-        background-color: #388e3c;
-        transform: translateY(-2px);
-    }
-    .stTextInput > div > div > input, .stTextArea > div > div > textarea, .stSelectbox > div > div {
-        background-color: #1a1e24; /* Darker input fields */
-        color: #e0e0e0;
-        border-radius: 8px;
-        border: 1px solid #333;
-    }
-    .stExpander {
-        border: 1px solid #333;
-        border-radius: 8px;
-        padding: 10px;
-        margin-bottom: 10px;
-        background-color: #1a1e24;
-    }
-    h1, h2, h3, h4, h5, h6 {
-        color: #76ff03; /* Bright green for headings */
-    }
-    /* Style for the sidebar radio buttons */
-    .stSidebar .stRadio div[role="radiogroup"] > label {
-        padding: 8px 10px;
-        border-radius: 8px;
-        margin-bottom: 5px;
-        transition: background-color 0.2s ease-in-out;
-    }
-    .stSidebar .stRadio div[role="radiogroup"] > label:hover {
-        background-color: #1a1e24; /* Darker hover */
-    }
-    .stSidebar .stRadio div[role="radiogroup"] > label[data-baseweb="radio"] > div {
-        color: #e0e0e0; /* Radio button text color */
-    }
-    /* Highlight selected radio button */
-    .stSidebar .stRadio div[role="radiogroup"] > label[aria-checked="true"] {
-        background-color: #333; /* Darker highlight */
-        border: 1px solid #76ff03; /* Green border for selected */
-    }
-    /* Specific style for success/error/warning messages */
-    .stSuccess, .stError, .stWarning, .stInfo {
-        border-radius: 8px;
-        padding: 10px;
-        margin-top: 10px;
-        margin-bottom: 10px;
-    }
-    /* Hide default Streamlit footer/header */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-</style>
-""", unsafe_allow_html=True)
-
-st.title("🚀 Augmento - Smart Pitch Evaluator")
-st.markdown("---")
-
-# --- Sidebar Navigation ---
-with st.sidebar:
-    st.image("https://via.placeholder.com/150x50?text=AugmentoLogo", use_container_width=True) # Placeholder logo
-    st.subheader("Navigation")
+# Web search functionality (SerpAPI integration)
+def search_serpapi(query: str, num_results: int = 5) -> str:
+    """Search the web using SerpAPI with error handling"""
+    if not serpapi_key:
+        return "❌ SerpAPI key not configured. Cannot perform web search."
     
-    # Use radio buttons for page selection
-    page_selection = st.radio(
-        "Go to",
-        ('Dashboard', 'CRM Management', 'AI Chat', 'Document Viewer', 'Comprehensive Analysis'),
-        key="main_page_selector"
-    )
-    st.session_state.page = page_selection
-
-    st.markdown("---")
-    st.subheader("Pitch Deck Upload")
-    uploaded_file = st.file_uploader("Choose a PDF file", type=["pdf"], label_visibility="collapsed", key="sidebar_pdf_uploader")
-
-    if uploaded_file and not st.session_state.file_uploaded:
-    st.session_state.uploaded_file_name = uploaded_file.name
-    st.session_state.file_uploaded = True  # Prevent future reprocessing
-
-    with st.spinner(f"🔄 Processing '{uploaded_file.name}'... This may take a moment."):
-        file_bytes = uploaded_file.read()
-        text = extract_pdf_text(file_bytes)
-
-        if text:
-            st.session_state.parsed_doc = text
-            st.session_state.sections = split_sections(text)
-            st.session_state.crm_data = extract_crm_data_with_fallback(text)
-            st.session_state.editable_crm_data = dict(st.session_state.crm_data)
-            st.success("✅ Pitch deck processed! Navigate using the options above.")
-        else:
-            st.session_state.file_uploaded = False
-            st.error("❌ Failed to extract text from PDF. Please ensure it's a searchable PDF (not just an image scan).")
-
-        # Reset states for a new upload
-        st.session_state.file_uploaded = False
-        st.session_state.parsed_doc = None
-        st.session_state.sections = {}
-        st.session_state.crm_data = None
-        st.session_state.comprehensive_analysis = None
-        st.session_state.chat_history = []
-        st.session_state.uploaded_file_name = uploaded_file.name
-        st.session_state.page = "Dashboard" # Redirect to dashboard on new upload
-
-        with st.spinner(f"🔄 Processing '{uploaded_file.name}'... This may take a moment."):
-            file_bytes = uploaded_file.read()
-            text = extract_pdf_text(file_bytes)
+    try:
+        search_url = "https://serpapi.com/search"
+        params = {
+            "q": query,
+            "api_key": serpapi_key,
+            "engine": "google",
+            "num": num_results,
+            "gl": "in",  # India
+            "hl": "en"
+        }
+        
+        response = requests.get(search_url, params=params, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        if "organic_results" not in data:
+            return "❌ No search results found."
+        
+        results = []
+        for i, result in enumerate(data["organic_results"][:num_results], 1):
+            title = result.get("title", "No title")
+            snippet = result.get("snippet", "No description")
+            link = result.get("link", "#")
             
-            if text:
-                st.session_state.parsed_doc = text
-                st.session_state.sections = split_sections(text)
-                st.session_state.file_uploaded = True
-                
-                # CRM data extraction happens immediately upon successful text extraction
-                st.session_state.crm_data = extract_crm_data_with_fallback(text)
-                st.session_state.editable_crm_data = dict(st.session_state.crm_data) # Populate editable copy
-                
-                st.success("✅ Pitch deck processed! Navigate using the options above.")
-                st.rerun() # Rerun to update UI with processed data and switch page
-            else:
-                st.error("❌ Failed to extract text from PDF. Please ensure it's a searchable PDF (not just an image scan).")
-                st.session_state.file_uploaded = False
+            results.append(f"**{i}. {title}**\n{snippet}\n🔗 {link}\n")
+        
+        return "\n".join(results)
+        
+    except requests.exceptions.Timeout:
+        return "❌ Search request timed out. Please try again."
+    except requests.exceptions.RequestException as e:
+        logger.error(f"SerpAPI request failed: {e}")
+        return f"❌ Search failed: {str(e)}"
+    except Exception as e:
+        logger.error(f"Unexpected error in search: {e}")
+        return f"❌ Search error: {str(e)}"
+
+# Comprehensive analysis generation
+def generate_comprehensive_analysis(doc_data: DocumentData) -> str:
+    """Generate comprehensive analysis of the pitch deck"""
+    if not doc_data or not doc_data.sections:
+        return "No document data available for analysis."
     
-    if st.session_state.file_uploaded:
-       st.success(f"Loaded: **{st.session_state.uploaded_file_name}**")
-       st.write(f"Document Length: {len(st.session_state.parsed_doc):,} chars")
-       st.write(f"Sections found: {len(st.session_state.sections)}")
-    else:
-       st.info("No pitch deck loaded.")
-    
-    st.markdown("---")
-    st.caption("Powered by OpenAI and Streamlit")
-
-# --- Main Content Area based on page selection ---
-if not st.session_state.file_uploaded and st.session_state.page != "Dashboard":
-    st.warning("Please upload a pitch deck PDF in the sidebar to access analysis features.")
-    st.session_state.page = "Dashboard" # Force user back to dashboard if no file is uploaded
-
-
-if st.session_state.page == "Dashboard":
-    st.header("🏠 Dashboard Overview")
-    if st.session_state.file_uploaded:
-        st.markdown(f"### Currently Analyzing: **{st.session_state.uploaded_file_name}**")
+    try:
+        llm = ChatOpenAI(
+            model="gpt-4o",
+            openai_api_key=openai_api_key,
+            temperature=0.1,
+            timeout=60
+        )
         
-        col_metrics, col_description = st.columns(2)
+        # Prepare sections text for analysis
+        sections_text = "\n\n".join([f"**{name}:**\n{content}" for name, content in doc_data.sections.items()])
         
-        with col_metrics:
-            st.subheader("Key Investment Metrics")
-            if st.session_state.crm_data:
-                st.metric("Company Name", st.session_state.crm_data.get('company_name', 'Not found'))
-                st.metric("Funding Ask", st.session_state.crm_data.get('ask', 'Not found'))
-                st.metric("Current Revenue", st.session_state.crm_data.get('revenue', 'Not found'))
-                st.metric("Valuation", st.session_state.crm_data.get('valuation', 'Not found'))
-                st.metric("Sector", st.session_state.crm_data.get('sector', 'Not found'))
-                st.metric("Stage", st.session_state.crm_data.get('stage', 'Not found'))
-            else:
-                st.info("CRM data not available. Ensure API key is valid and document is processed.")
+        if len(sections_text) > 12000:
+            sections_text = sections_text[:12000] + "\n[Content truncated for analysis...]"
         
-        with col_description:
-            st.subheader("Company Description")
-            if st.session_state.crm_data and st.session_state.crm_data.get('description') != 'Not found':
-                st.write(st.session_state.crm_data['description'])
-            else:
-                st.info("Company description not found in the pitch deck.")
-            
-            st.subheader("Quick Actions")
-            if st.button("Start Chat with AI", use_container_width=True):
-                st.session_state.page = "AI Chat"
-                st.rerun()
-            if st.button("Generate Comprehensive Analysis", use_container_width=True):
-                st.session_state.page = "Comprehensive Analysis"
-                st.session_state.comprehensive_analysis = None # Clear to force generation
-                st.rerun()
-            if st.button("View Raw Document Sections", use_container_width=True):
-                st.session_state.page = "Document Viewer"
-                st.rerun()
-    else:
-        st.info("Welcome to Augmento! Please upload a pitch deck PDF using the uploader in the sidebar to get started.")
-        st.image("https://via.placeholder.com/700x350?text=Upload+Your+Pitch+Deck+to+Begin", use_container_width=True, caption="Augmento: Your Smart Pitch Evaluator")
+        analysis_prompt = f"""
+        Analyze this pitch deck comprehensively. Provide detailed insights on:
 
-elif st.session_state.page == "CRM Management":
-    st.header("📋 CRM Data Management")
-    if st.session_state.file_uploaded and st.session_state.crm_data:
-        st.write("Review and edit the extracted CRM data below. This data will be used for exporting.")
+        1. **Executive Summary** (2-3 sentences)
+        2. **Strengths** (3-4 key strong points)
+        3. **Areas for Improvement** (3-4 specific suggestions)
+        4. **Market Analysis** (market size, opportunity, competition)
+        5. **Business Model Assessment** (revenue streams, scalability)
+        6. **Team Evaluation** (founder background, experience)
+        7. **Financial Health** (current metrics, projections)
+        8. **Investment Readiness** (overall score 1-10 with reasoning)
+        9. **Recommendations** (next steps for the startup)
 
-        # Ensure editable_crm_data is initialized from crm_data
-        if st.session_state.editable_crm_data is None:
-            st.session_state.editable_crm_data = dict(st.session_state.crm_data)
+        Make it actionable and investor-focused.
 
-        with st.form("crm_edit_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("Key Information")
-                st.session_state.editable_crm_data['company_name'] = st.text_input(
-                    "Company Name", st.session_state.editable_crm_data.get('company_name', ''))
-                st.session_state.editable_crm_data['ask'] = st.text_input(
-                    "Funding Ask", st.session_state.editable_crm_data.get('ask', ''))
-                st.session_state.editable_crm_data['revenue'] = st.text_input(
-                    "Revenue", st.session_state.editable_crm_data.get('revenue', ''))
-                st.session_state.editable_crm_data['valuation'] = st.text_input(
-                    "Valuation", st.session_state.editable_crm_data.get('valuation', ''))
-                st.session_state.editable_crm_data['sector'] = st.text_input(
-                    "Sector", st.session_state.editable_crm_data.get('sector', ''))
-                st.session_state.editable_crm_data['stage'] = st.text_input(
-                    "Stage", st.session_state.editable_crm_data.get('stage', ''))
-            
-            with col2:
-                st.subheader("Additional Details")
-                st.session_state.editable_crm_data['prior_funding'] = st.text_input(
-                    "Prior Funding", st.session_state.editable_crm_data.get('prior_funding', ''))
-                st.session_state.editable_crm_data['assign'] = st.text_area(
-                    "Assign (Founders/Team)", st.session_state.editable_crm_data.get('assign', ''), height=80)
-                st.session_state.editable_crm_data['description'] = st.text_area(
-                    "Description", st.session_state.editable_crm_data.get('description', ''), height=120)
-                st.session_state.editable_crm_data['source'] = st.text_input(
-                    "Source", st.session_state.editable_crm_data.get('source', 'Pitch Deck Upload'), disabled=True)
-                st.session_state.editable_crm_data['received_date'] = st.text_input(
-                    "Received Date", st.session_state.editable_crm_data.get('received_date', ''), disabled=True)
-
-            submitted = st.form_submit_button("Update CRM Data", type="primary", use_container_width=True)
-            if submitted:
-                st.session_state.crm_data = dict(st.session_state.editable_crm_data) # Save changes to main CRM data
-                st.success("CRM Data Updated Successfully!")
+        Pitch Deck Content:
+        {sections_text}
         
-        st.markdown("---")
-        st.subheader("⬇️ Export & Integration")
-        col_export_json, col_export_zoho = st.columns(2)
-        with col_export_json:
-            st.download_button(
-                label="Download CRM Data (JSON)",
-                data=json.dumps(st.session_state.crm_data, indent=2),
-                file_name=f"crm_data_{st.session_state.crm_data.get('company_name', 'pitch_deck').replace(' ', '_')}.json",
-                mime="application/json",
-                use_container_width=True
-            )
-        with col_export_zoho:
-            # Zoho webhook integration (optional) - requires a server-side component for real use
-            if os.getenv("ZOHO_WEBHOOK_URL"):
-                if st.button("🔗 Send to Zoho CRM (WIP)", use_container_width=True):
-                    st.info("Sending data to Zoho is a work in progress and requires proper API integration.")
-                    # Placeholder for actual Zoho integration
-                    # try:
-                    #     send_to_zoho_webhook(st.session_state.crm_data, os.getenv("ZOHO_WEBHOOK_URL"))
-                    #     st.success("Data sent to Zoho CRM!")
-                    # except Exception as e:
-                    #     st.error(f"Failed to send to Zoho: {e}")
-            else:
-                st.info("💡 Tip: Set `ZOHO_WEBHOOK_URL` in your `.env` file to enable direct CRM export.")
-
-    else:
-        st.info("Upload a pitch deck PDF in the sidebar to extract and manage CRM data.")
-
-elif st.session_state.page == "AI Chat":
-    st.header("💬 Chat with Augmento AI")
-    if st.session_state.file_uploaded:
-        st.markdown("Ask specific questions about the pitch deck or perform web searches.")
-
-        # Quick Prompts / Suggestions
-        st.subheader("💡 Quick Prompts:")
-        quick_prompts = [
-            "What is the funding ask?", "Who are the founders?",
-            "What is the company's valuation?", "What problem does this solve?",
-            "What is the business model?", "Search web for founder background",
-            "Show me the market opportunity", "What is their traction?",
-            "Give me an investment recommendation."
+        CRM Data:
+        Company: {doc_data.crm_data.get('company_name', 'N/A')}
+        Ask: {doc_data.crm_data.get('ask', 'N/A')}
+        Revenue: {doc_data.crm_data.get('revenue', 'N/A')}
+        Valuation: {doc_data.crm_data.get('valuation', 'N/A')}
+        Sector: {doc_data.crm_data.get('sector', 'N/A')}
+        """
+        
+        messages = [
+            SystemMessage(content="You are a senior VC analyst providing comprehensive pitch deck analysis."),
+            HumanMessage(content=analysis_prompt)
         ]
         
-        cols = st.columns(3)
-        for i, question in enumerate(quick_prompts):
-            with cols[i % 3]:
-                if st.button(question, key=f"quick_prompt_{i}"):
-                    with st.spinner("🤖 Augmento is thinking..."):
-                        response = chat_with_ai(question)
-                        timestamp = datetime.now().strftime("%H:%M:%S")
-                        st.session_state.chat_history.append({"user": question, "ai": response, "time": timestamp})
-                        st.session_state.active_chat_index = len(st.session_state.chat_history) - 1
-                        # st.rerun() # Removed rerun here to allow typing without immediate refresh, will rerurn on send
-
-        # Main Chat Input
-        user_input = st.text_input("Your question:", key="chat_input_main", placeholder="e.g., 'What is their go-to-market strategy?' or 'Web search for competitors of [Company Name]'", on_change=None)
-        send_button = st.button("Send Query", type="primary", use_container_width=False) # Keep send button simple
-
-        if send_button and user_input:
-            with st.spinner("🤖 Augmento is analyzing..."):
-                response = chat_with_ai(user_input)
-                timestamp = datetime.now().strftime("%H:%M:%S")
-                st.session_state.chat_history.append({"user": user_input, "ai": response, "time": timestamp})
-                st.session_state.active_chat_index = len(st.session_state.chat_history) - 1
-                st.experimental_rerun() # Force rerun to clear input and update chat history
+        response = llm.invoke(messages)
+        return response.content
         
-        # Display Conversation History
-        st.markdown("---")
-        st.subheader("Your Conversation History:")
-        if not st.session_state.chat_history:
-            st.info("No conversations yet. Start by asking a question!")
-        else:
-            if st.button("🗑️ Clear Chat History", key="clear_chat_history", use_container_width=True):
-                st.session_state.chat_history = []
-                st.session_state.active_chat_index = None
-                st.experimental_rerun() # Use experimental_rerun for clearing
+    except Exception as e:
+        logger.error(f"Comprehensive analysis failed: {e}")
+        return f"❌ Analysis failed: {str(e)}"
 
-            # Display chat history, most recent at top
-            for i in range(len(st.session_state.chat_history) -1, -1, -1):
-                chat_entry = st.session_state.chat_history[i]
-                is_expanded = (i == st.session_state.active_chat_index)
-                with st.expander(f"Q: {chat_entry['user'][:70]}{'...' if len(chat_entry['user']) > 70 else ''} ({chat_entry['time']})", expanded=is_expanded):
-                    st.markdown(f"**🧑 You:** {chat_entry['user']}")
-                    st.markdown(f"**🤖 Augmento AI:**")
-                    st.markdown(chat_entry['ai'])
-                    st.markdown(f"<small><em>{chat_entry['time']}</em></small>", unsafe_allow_html=True)
-    else:
-        st.info("Upload a pitch deck PDF in the sidebar to start chatting with Augmento AI.")
-
-elif st.session_state.page == "Comprehensive Analysis":
-    st.header("🔍 Comprehensive VC Analysis")
-    if st.session_state.file_uploaded:
-        st.info("This analysis provides an in-depth assessment from an investor's perspective. It may take up to a minute to generate.")
+# Streamlit UI Components
+def render_sidebar():
+    """Render sidebar with document management and controls"""
+    with st.sidebar:
+        st.header("📁 Document Manager")
         
-        if st.button("Generate/Refresh Comprehensive Analysis", key="generate_comp_analysis", use_container_width=True):
-            st.session_state.comprehensive_analysis = None # Clear existing to force regeneration
-            with st.spinner("🔄 Generating comprehensive analysis..."):
-                st.session_state.comprehensive_analysis = extract_comprehensive_analysis(st.session_state.parsed_doc)
-                if st.session_state.comprehensive_analysis.startswith("Error"):
-                    st.error(f"Analysis generation failed. {st.session_state.comprehensive_analysis}")
+        # File upload
+        uploaded_file = st.file_uploader(
+            "Upload Pitch Deck (PDF)",
+            type=['pdf'],
+            help="Upload a pitch deck PDF for analysis"
+        )
         
-        if st.session_state.comprehensive_analysis:
-            st.markdown(st.session_state.comprehensive_analysis)
-            st.markdown("---")
-            st.download_button(
-                label="⬇️ Download Analysis Report (Markdown)",
-                data=st.session_state.comprehensive_analysis,
-                file_name=f"vc_analysis_report_{st.session_state.crm_data.get('company_name', 'pitch_deck').replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.md",
-                mime="text/markdown",
-                use_container_width=True
-            )
-        else:
-             st.info("Click 'Generate/Refresh Comprehensive Analysis' above to generate the full report.")
-    else:
-        st.info("Upload a pitch deck PDF in the sidebar to generate a comprehensive VC analysis.")
-
-elif st.session_state.page == "Document Viewer":
-    st.header("📑 Pitch Deck Document Sections")
-    if st.session_state.file_uploaded:
-        st.info("Browse the raw extracted text, split into logical sections. Useful for verifying content and finding specific details.")
-        if st.session_state.sections:
-            section_options = list(st.session_state.sections.keys())
+        if uploaded_file is not None:
+            file_bytes = uploaded_file.read()
+            doc_id = process_document(file_bytes, uploaded_file.name)
             
-            # Selectbox to choose a section
-            selected_section_name = st.selectbox(
-                "Select a section to view its content:",
-                options=['-- Select a Section --'] + section_options,
-                key="section_selector_viewer"
-            )
-
-            if selected_section_name and selected_section_name != '-- Select a Section --':
-                st.subheader(f"Content of: {selected_section_name}")
-                st.text_area(
-                    f"Section: {selected_section_name}",
-                    st.session_state.sections[selected_section_name],
-                    height=400,
-                    key=f"section_content_display_{selected_section_name}"
-                )
-                if st.button(f"Ask AI to analyze this '{selected_section_name}' section", use_container_width=True):
-                    with st.spinner("🤖 Analyzing section..."):
-                        analysis_query = f"Provide a detailed analysis of the '{selected_section_name}' section."
-                        response = chat_with_ai(analysis_query)
-                        timestamp = datetime.now().strftime("%H:%M:%S")
-                        st.session_state.chat_history.append({"user": analysis_query, "ai": response, "time": timestamp})
-                        st.session_state.active_chat_index = len(st.session_state.chat_history) - 1
-                        st.session_state.page = "AI Chat" # Navigate to chat to show response
-                        st.rerun()
+            if doc_id:
+                st.success(f"✅ Successfully processed: {uploaded_file.name}")
             else:
-                st.markdown("Please select a section from the dropdown to view its content.")
-        else:
-            st.info("No sections available. Please upload a PDF.")
+                st.error("❌ Failed to process document")
+        
+        # Document selector if multiple documents
+        if st.session_state.parsed_documents:
+            st.subheader("📄 Processed Documents")
+            
+            doc_options = {}
+            for doc_id, doc_data in st.session_state.parsed_documents.items():
+                status_emoji = "✅" if doc_data.processing_status == "completed" else "❌"
+                doc_options[f"{status_emoji} {doc_data.file_name}"] = doc_id
+            
+            if len(doc_options) > 1:
+                selected_doc = st.selectbox(
+                    "Select Document",
+                    options=list(doc_options.keys()),
+                    index=0
+                )
+                st.session_state.current_doc_id = doc_options[selected_doc]
+        
+        # Quick actions
+        current_doc = get_current_doc()
+        if current_doc and current_doc.processing_status == "completed":
+            st.subheader("🎯 Quick Actions")
+            
+            if st.button("📊 Generate Analysis", use_container_width=True):
+                st.session_state.show_comprehensive_analysis = True
+            
+            if st.button("🏢 CRM Summary", use_container_width=True):
+                st.session_state.show_crm_summary = True
+            
+            if st.button("🔍 Web Search", use_container_width=True):
+                if current_doc.crm_data.get('company_name') != 'Not found':
+                    company_name = current_doc.crm_data['company_name']
+                    st.session_state.chat_history.append({
+                        'role': 'user',
+                        'content': f'search web for {company_name} background'
+                    })
+                else:
+                    st.warning("Company name not found for web search")
+            
+            # Document stats
+            st.subheader("📈 Document Stats")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Characters", f"{current_doc.char_count:,}")
+            with col2:
+                st.metric("Sections", len(current_doc.sections))
+
+def render_main_content():
+    """Render main content area"""
+    current_doc = get_current_doc()
+    
+    if not current_doc or current_doc.processing_status != "completed":
+        st.title("🚀 Pitch Deck AI Analyzer")
+        st.markdown("""
+        ### Welcome to the AI-powered Pitch Deck Analyzer!
+        
+        **Features:**
+        - 📄 **PDF Text Extraction** - Advanced PDF parsing with multiple fallback methods
+        - 🧠 **AI Analysis** - GPT-4 powered comprehensive analysis
+        - 💼 **CRM Integration** - Automatic extraction of key business metrics
+        - 🔍 **Web Search** - Real-time company background research
+        - 💬 **Interactive Chat** - Ask specific questions about the pitch deck
+        
+        **Get Started:**
+        1. Upload your pitch deck PDF using the sidebar
+        2. Wait for processing to complete
+        3. Explore sections, chat, or generate comprehensive analysis
+        
+        **Supported Formats:** PDF files only
+        """)
+        return
+    
+    # Main title with company name
+    company_name = current_doc.crm_data.get('company_name', 'Unknown Company')
+    st.title(f"📊 {company_name}" if company_name != 'Not found' else "📊 Pitch Deck Analysis")
+    
+    # Status indicator
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        st.info(f"📄 **Document:** {current_doc.file_name}")
+    with col2:
+        st.success(f"✅ **Status:** Processed")
+    with col3:
+        st.info(f"📅 **Date:** {current_doc.created_at[:10]}")
+
+def render_comprehensive_analysis():
+    """Render comprehensive analysis section"""
+    current_doc = get_current_doc()
+    if not current_doc:
+        return
+    
+    st.subheader("🔍 Comprehensive Analysis")
+    
+    # Generate analysis if not cached
+    if not current_doc.comprehensive_analysis:
+        with st.spinner("🧠 Generating comprehensive analysis..."):
+            current_doc.comprehensive_analysis = generate_comprehensive_analysis(current_doc)
+    
+    if current_doc.comprehensive_analysis:
+        st.markdown(current_doc.comprehensive_analysis)
+        
+        # Download button
+        st.download_button(
+            label="📥 Download Analysis",
+            data=current_doc.comprehensive_analysis,
+            file_name=f"{current_doc.file_name}_analysis.txt",
+            mime="text/plain"
+        )
     else:
-        st.info("Upload a pitch deck PDF in the sidebar to view its extracted sections.")
+        st.error("❌ Failed to generate comprehensive analysis")
 
+def render_crm_summary():
+    """Render CRM data summary"""
+    current_doc = get_current_doc()
+    if not current_doc or not current_doc.crm_data:
+        return
+    
+    st.subheader("🏢 CRM Summary")
+    
+    crm = current_doc.crm_data
+    
+    # Key metrics in columns
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("💰 Funding Ask", crm.get('ask', 'Not found'))
+        st.metric("🏭 Sector", crm.get('sector', 'Not found'))
+    
+    with col2:
+        st.metric("💵 Revenue", crm.get('revenue', 'Not found'))
+        st.metric("📊 Stage", crm.get('stage', 'Not found'))
+    
+    with col3:
+        st.metric("🏷️ Valuation", crm.get('valuation', 'Not found'))
+        st.metric("💼 Prior Funding", crm.get('prior_funding', 'Not found'))
+    
+    # Additional details
+    st.markdown("### 📋 Details")
+    
+    details = {
+        "👥 Team/Founders": crm.get('assign', 'Not found'),
+        "📝 Description": crm.get('description', 'Not found'),
+        "📧 Source": crm.get('source', 'Not found'),
+        "📅 Received": crm.get('received_date', 'Not found')
+    }
+    
+    for label, value in details.items():
+        if value != 'Not found':
+            st.write(f"**{label}:** {value}")
+    
+    # Export CRM data
+    if st.button("📤 Export CRM Data"):
+        crm_json = json.dumps(crm, indent=2)
+        st.download_button(
+            label="📥 Download CRM Data (JSON)",
+            data=crm_json,
+            file_name=f"{current_doc.file_name}_crm.json",
+            mime="application/json"
+        )
 
-st.markdown("---")
-st.markdown("Augmento - Your Smart Pitch Evaluator")
-st.caption("Version 2.0 | Developed for efficient VC analysis.")
+def render_sections_view():
+    """Render sections view"""
+    current_doc = get_current_doc()
+    if not current_doc or not current_doc.sections:
+        return
+    
+    st.subheader("📑 Document Sections")
+    
+    # Section selector
+    section_names = list(current_doc.sections.keys())
+    selected_section = st.selectbox(
+        "Select Section to View",
+        options=section_names,
+        index=0
+    )
+    
+    if selected_section:
+        st.markdown(f"### {selected_section}")
+        content = current_doc.sections[selected_section]
+        
+        # Show content in expandable container
+        with st.expander(f"View {selected_section} Content", expanded=True):
+            st.markdown(content)
+        
+        # Word count
+        word_count = len(content.split())
+        st.caption(f"📊 **Word Count:** {word_count} | **Character Count:** {len(content)}")
 
+def render_chat_interface():
+    """Render chat interface"""
+    current_doc = get_current_doc()
+    if not current_doc:
+        return
+    
+    st.subheader("💬 Chat with AI")
+    
+    # Display chat history
+    if st.session_state.chat_history:
+        for i, message in enumerate(st.session_state.chat_history[-10:]):  # Show last 10 messages
+            if message['role'] == 'user':
+                st.chat_message("user").write(message['content'])
+            else:
+                st.chat_message("assistant").write(message['content'])
+    
+    # Chat input
+    user_input = st.chat_input("Ask anything about the pitch deck...")
+    
+    if user_input:
+        # Add user message to history
+        st.session_state.chat_history.append({
+            'role': 'user',
+            'content': user_input
+        })
+        
+        # Display user message
+        st.chat_message("user").write(user_input)
+        
+        # Generate AI response
+        with st.chat_message("assistant"):
+            with st.spinner("🤔 Thinking..."):
+                ai_response = chat_with_ai(user_input)
+                st.write(ai_response)
+        
+        # Add AI response to history
+        st.session_state.chat_history.append({
+            'role': 'assistant',
+            'content': ai_response
+        })
+        
+        # Rerun to update display
+        st.rerun()
+    
+    # Quick question buttons
+    st.subheader("🎯 Quick Questions")
+    quick_questions = [
+        "What is the funding ask?",
+        "Who are the founders?",
+        "What problem are they solving?",
+        "What's their business model?",
+        "Show me the market size",
+        "What's their traction?",
+        "Search web for company background"
+    ]
+    
+    cols = st.columns(2)
+    for i, question in enumerate(quick_questions):
+        col = cols[i % 2]
+        if col.button(question, key=f"quick_{i}"):
+            st.session_state.chat_history.append({
+                'role': 'user',
+                'content': question
+            })
+            st.rerun()
 
-# --- Debug Information (Optional) ---
-if st.checkbox("🔧 Show Debug Info (for developers)"):
-    st.subheader("Current Session State")
-    st.json({k: (v if not (isinstance(v, str) and len(v) > 200) else f"{v[:200]}...") for k, v in st.session_state.items()})
+# Main application function
+def main():
+    """Main Streamlit application"""
+    st.set_page_config(
+        page_title="Pitch Deck AI Analyzer",
+        page_icon="🚀",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Initialize session state
+    initialize_session_state()
+    
+    # Render sidebar
+    render_sidebar()
+    
+    # Main content tabs
+    current_doc = get_current_doc()
+    
+    if current_doc and current_doc.processing_status == "completed":
+        # Create tabs for different views
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📊 Overview", "📑 Sections", "💬 Chat", "🔍 Analysis", "🏢 CRM Data"
+        ])
+        
+        with tab1:
+            render_main_content()
+        
+        with tab2:
+            render_sections_view()
+        
+        with tab3:
+            render_chat_interface()
+        
+        with tab4:
+            render_comprehensive_analysis()
+        
+        with tab5:
+            render_crm_summary()
+    
+    else:
+        render_main_content()
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        """
+        <div style='text-align: center; color: gray;'>
+        🚀 Pitch Deck AI Analyzer | Powered by OpenAI GPT-4 & SerpAPI
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
-    if st.session_state.parsed_doc:
-        st.subheader("Raw Extracted Text Sample (first 2000 characters)")
-        st.text_area("Full Raw Text", st.session_state.parsed_doc[:2000], height=300)
+# Run the application
+if __name__ == "__main__":
+    main()
+
+# Additional utility functions for error handling and logging
+
+def handle_streamlit_error(func):
+    """Decorator for handling Streamlit errors gracefully"""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Streamlit error in {func.__name__}: {e}")
+            st.error(f"❌ An error occurred: {str(e)}")
+            return None
+    return wrapper
+
+# Configuration for deployment
+def setup_logging():
+    """Setup logging for production deployment"""
+    log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    logging.basicConfig(
+        level=logging.INFO,
+        format=log_format,
+        handlers=[
+            logging.FileHandler('pitch_deck_analyzer.log'),
+            logging.StreamHandler()
+        ]
+    )
+
+# Health check endpoint for deployment
+def health_check():
+    """Health check for deployment monitoring"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "components": {
+            "openai": bool(openai_api_key),
+            "serpapi": bool(serpapi_key)
+        }
+    }
