@@ -763,7 +763,24 @@ with st.sidebar:
     st.subheader("Pitch Deck Upload")
     uploaded_file = st.file_uploader("Choose a PDF file", type=["pdf"], label_visibility="collapsed", key="sidebar_pdf_uploader")
 
-    if uploaded_file and uploaded_file.name != st.session_state.uploaded_file_name:
+    if uploaded_file and not st.session_state.file_uploaded:
+    st.session_state.uploaded_file_name = uploaded_file.name
+    st.session_state.file_uploaded = True  # Prevent future reprocessing
+
+    with st.spinner(f"🔄 Processing '{uploaded_file.name}'... This may take a moment."):
+        file_bytes = uploaded_file.read()
+        text = extract_pdf_text(file_bytes)
+
+        if text:
+            st.session_state.parsed_doc = text
+            st.session_state.sections = split_sections(text)
+            st.session_state.crm_data = extract_crm_data_with_fallback(text)
+            st.session_state.editable_crm_data = dict(st.session_state.crm_data)
+            st.success("✅ Pitch deck processed! Navigate using the options above.")
+        else:
+            st.session_state.file_uploaded = False
+            st.error("❌ Failed to extract text from PDF. Please ensure it's a searchable PDF (not just an image scan).")
+
         # Reset states for a new upload
         st.session_state.file_uploaded = False
         st.session_state.parsed_doc = None
@@ -794,11 +811,11 @@ with st.sidebar:
                 st.session_state.file_uploaded = False
     
     if st.session_state.file_uploaded:
-        st.success(f"Loaded: **{st.session_state.uploaded_file_name}**")
-        st.write(f"Document Length: {len(st.session_state.parsed_doc):,} chars")
-        st.write(f"Sections found: {len(st.session_state.sections)}")
+       st.success(f"Loaded: **{st.session_state.uploaded_file_name}**")
+       st.write(f"Document Length: {len(st.session_state.parsed_doc):,} chars")
+       st.write(f"Sections found: {len(st.session_state.sections)}")
     else:
-        st.info("No pitch deck loaded.")
+       st.info("No pitch deck loaded.")
     
     st.markdown("---")
     st.caption("Powered by OpenAI and Streamlit")
