@@ -27,12 +27,6 @@ if not openai_api_key:
 # Session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-if "user_message" not in st.session_state:
-    st.session_state.user_message = ""
-if "chat_input" not in st.session_state:
-    st.session_state.chat_input = ""
-if "last_question" not in st.session_state:
-    st.session_state.last_question = ""
 
 # Categories
 faq_categories = {
@@ -77,7 +71,19 @@ st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout
 st.title("💼 Investment Process FAQ Chatbot")
 
 st.header("💬 Ask a Question")
-user_input = st.text_input("Your question:", key="user_message")
+
+# Initialize input clearing mechanism
+if "clear_input" not in st.session_state:
+    st.session_state.clear_input = False
+
+# Use a unique key that gets reset
+input_key = "user_input"
+if st.session_state.clear_input:
+    st.session_state.clear_input = False
+    if input_key in st.session_state:
+        del st.session_state[input_key]
+
+user_input = st.text_input("Your question:", key=input_key)
 
 col1, col2 = st.columns([1, 4])
 with col1:
@@ -111,8 +117,8 @@ Answer:
             writer = csv.writer(f)
             writer.writerow([timestamp, user_input, response.content, ""])
 
-        # Clear the input after processing
-        st.session_state.user_message = ""
+        # Trigger input clearing and rerun
+        st.session_state.clear_input = True
         st.rerun()
 
     except OpenAIError as e:
