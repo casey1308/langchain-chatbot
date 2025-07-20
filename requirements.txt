@@ -1,6 +1,7 @@
 streamlit
 openai
 langchain
-google-search-results==2.4.2
+langchain-openai
+langchain-core
 scikit-learn
 python-dotenv
