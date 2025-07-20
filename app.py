@@ -70,7 +70,6 @@ faq_questions = list(faq_data.keys())
 
 # Autocomplete suggestions
 user_input = st.text_input("💬 Ask your question:", key="user_message")
-
 suggestions = difflib.get_close_matches(user_input, faq_questions, n=3) if user_input else []
 
 if suggestions:
@@ -86,8 +85,7 @@ def get_best_faq_response(query):
     vectorizer = TfidfVectorizer().fit_transform([query] + faq_questions)
     sims = cosine_similarity(vectorizer[0:1], vectorizer[1:]).flatten()
     top_index = sims.argmax()
-    top_score = sims[top_index]
-    return faq_questions[top_index], faq_data[faq_questions[top_index]], top_score
+    return faq_questions[top_index], faq_data[faq_questions[top_index]]
 
 # Send message
 col1, col2 = st.columns([1, 4])
@@ -99,8 +97,7 @@ with col2:
 if send and user_input.strip():
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.2)
-        best_q, best_a, score = get_best_faq_response(user_input)
-
+        best_q, best_a = get_best_faq_response(user_input)
         system_prompt = style_prompt_map.get(bot_style, "")
         prompt = f"""You are a startup investment chatbot.
 Use this tone: {system_prompt}
@@ -142,7 +139,6 @@ if st.session_state.chat_history:
     for i, (q, a, timestamp) in enumerate(reversed(st.session_state.chat_history[-10:])):
         with st.expander(f"{i+1}. {q} ({timestamp})", expanded=(i == 0)):
             st.markdown(f"**🤖 Answer:** {a}")
-
             cols = st.columns(3)
             if cols[0].button("❤️", key=f"like_{i}"):
                 with open("chat_log.csv", "r", encoding="utf-8") as f:
@@ -177,14 +173,3 @@ if st.session_state.last_question:
         if st.button(f"➕ {r}"):
             st.session_state.user_message = r
             st.rerun()
-
-# Investor Readiness Quiz
-with st.expander("🧠 Are you investor-ready? Take our 30-second quiz!"):
-    q1 = st.radio("Do you have a pitch deck?", ["Yes", "No"], key="quiz_q1")
-    q2 = st.radio("Have you raised funding before?", ["Yes", "No"], key="quiz_q2")
-    q3 = st.radio("Do you have a live product or MVP?", ["Yes", "No"], key="quiz_q3")
-
-    if st.button("Check Readiness"):
-        score = sum([q == "Yes" for q in [q1, q2, q3]])
-        readiness = score * 33
-        st.success(f"🎯 You are {readiness}% investment-ready!")
