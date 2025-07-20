@@ -1,3 +1,18 @@
+import os
+os.environ["STREAMLIT_WATCHER_TYPE"] = "none"  # fix inotify error
+
+import streamlit as st
+import csv
+import logging
+from dotenv import load_dotenv
+from datetime import datetime
+from openai import OpenAIError
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
+from serpapi import GoogleSearch
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 import streamlit as st
 import os
 import csv
