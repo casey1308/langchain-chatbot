@@ -6,3 +6,4 @@ langchain-core
 scikit-learn
 python-dotenv
 pandas
+altair
