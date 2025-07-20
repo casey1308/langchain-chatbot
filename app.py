@@ -27,8 +27,17 @@ if not openai_api_key:
 # Session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-if "trigger_rerun" not in st.session_state:
-    st.session_state.trigger_rerun = False
+if "user_message" not in st.session_state:
+    st.session_state.user_message = ""
+if "chat_input" not in st.session_state:
+    st.session_state.chat_input = ""
+if "last_question" not in st.session_state:
+    st.session_state.last_question = ""
+
+# ✅ Safe rerun handler
+if st.session_state.get("_rerun_trigger"):
+    st.session_state._rerun_trigger = False
+    st.experimental_rerun()
 
 # Categories
 faq_categories = {
@@ -60,7 +69,7 @@ selected_category = st.sidebar.selectbox("Choose a category", list(faq_categorie
 faq_data = faq_categories[selected_category]
 faq_questions = list(faq_data.keys())
 
-# Match
+# Get best FAQ match
 def get_best_faq_response(user_input):
     vectorizer = TfidfVectorizer().fit_transform([user_input] + faq_questions)
     sims = cosine_similarity(vectorizer[0:1], vectorizer[1:]).flatten()
@@ -68,9 +77,10 @@ def get_best_faq_response(user_input):
     top_score = sims[top_index]
     return faq_questions[top_index], faq_data[faq_questions[top_index]], top_score
 
-# UI
+# Header and input
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
 st.title("💼 Investment Process FAQ Chatbot")
+
 st.header("💬 Ask a Question")
 user_input = st.text_input("Your question:", key="user_message")
 
@@ -80,7 +90,7 @@ with col1:
 with col2:
     reset = st.button("🗑️ Clear History")
 
-# Query logic
+# Process user query
 if send and user_input.strip():
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.2)
@@ -106,42 +116,50 @@ Answer:
             writer = csv.writer(f)
             writer.writerow([timestamp, user_input, response.content, ""])
 
-        st.session_state.trigger_rerun = True
+        st.session_state._rerun_trigger = True
+
     except OpenAIError as e:
         st.error(f"❌ OpenAI Error: {str(e)}")
 
-# Reset chat
+# Clear history
 if reset:
     st.session_state.chat_history = []
-    st.session_state.trigger_rerun = True
+    st.session_state._rerun_trigger = True
 
-# Display chat
+# Display chat history
 if st.session_state.chat_history:
     st.subheader("📜 Chat History")
     for i, (q, a, timestamp) in enumerate(reversed(st.session_state.chat_history[-10:])):
         with st.expander(f"{i+1}. {q} ({timestamp})", expanded=(i == 0)):
             st.markdown(f"**🤖 Answer:** {a}")
+
             col1, col2 = st.columns(2)
             with col1:
                 if st.button(f"👍 Helpful", key=f"up_{i}"):
-                    df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
-                    df.at[len(df) - (i+1), "Feedback"] = "👍"
-                    df.to_csv("chat_log.csv", index=False, header=False)
+                    with open("chat_log.csv", "r", encoding="utf-8") as f:
+                        rows = list(csv.reader(f))
+                    rows[-(i+1)][3] = "👍"
+                    with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerows(rows)
                     st.success("Thanks for your feedback!")
             with col2:
                 if st.button(f"👎 Not Helpful", key=f"down_{i}"):
-                    df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
-                    df.at[len(df) - (i+1), "Feedback"] = "👎"
-                    df.to_csv("chat_log.csv", index=False, header=False)
+                    with open("chat_log.csv", "r", encoding="utf-8") as f:
+                        rows = list(csv.reader(f))
+                    rows[-(i+1)][3] = "👎"
+                    with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerows(rows)
                     st.warning("Feedback noted. Thank you!")
 
-# Export logs
+# Download Chat Log
 if os.path.exists("chat_log.csv"):
     with open("chat_log.csv", "r", encoding="utf-8") as f:
         chat_log_data = f.read()
-    st.download_button("📅 Export Chat Log", data=chat_log_data, file_name="chat_log.csv", mime="text/csv")
+    st.download_button("📥 Export Chat Log", data=chat_log_data, file_name="chat_log.csv", mime="text/csv")
 
-# Feedback summary
+# Feedback Summary
 if os.path.exists("chat_log.csv"):
     df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
     pos = df["Feedback"].value_counts().get("👍", 0)
@@ -150,36 +168,47 @@ if os.path.exists("chat_log.csv"):
     st.sidebar.metric("👍 Helpful", pos)
     st.sidebar.metric("👎 Not Helpful", neg)
 
-# Analytics
+# 📊 Feedback Analytics
 st.sidebar.markdown("---")
 if st.sidebar.checkbox("📊 Show Feedback Analytics"):
     st.subheader("📈 Feedback Analytics")
+
     if os.path.exists("chat_log.csv"):
         df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
         df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-        df["Date"] = df["Timestamp"].dt.date
-        trend = df[df["Feedback"].isin(["👍", "👎"])]
-        trend = trend.groupby(["Date", "Feedback"]).size().reset_index(name="Count")
+
+        # Line chart of feedback over time
+        feedback_timeline = df[df["Feedback"].isin(["👍", "👎"])]
+        feedback_timeline["Date"] = feedback_timeline["Timestamp"].dt.date
+        trend = feedback_timeline.groupby(["Date", "Feedback"]).size().reset_index(name="Count")
 
         import altair as alt
         chart = alt.Chart(trend).mark_line(point=True).encode(
-            x="Date:T", y="Count:Q", color="Feedback:N"
+            x="Date:T",
+            y="Count:Q",
+            color="Feedback:N"
         ).properties(width=700, height=300, title="Feedback Trend Over Time")
 
         st.altair_chart(chart, use_container_width=True)
-        
+
+        # Most liked questions
         st.markdown("#### 🥇 Top Helpful Questions")
-        st.write(df[df["Feedback"] == "👍"]["Question"].value_counts().head(5))
+        pos_df = df[df["Feedback"] == "👍"]["Question"].value_counts().head(5)
+        st.write(pos_df)
 
+        # Most disliked questions
         st.markdown("#### ⚠️ Most Unhelpful Questions")
-        st.write(df[df["Feedback"] == "👎"]["Question"].value_counts().head(5))
+        neg_df = df[df["Feedback"] == "👎"]["Question"].value_counts().head(5)
+        st.write(neg_df)
 
-        bar = alt.Chart(df["Feedback"].value_counts().reset_index()).mark_bar().encode(
-            x="index:N", y="Feedback:Q", color="index:N"
+        # Bar chart of feedback summary
+        feedback_summary = df["Feedback"].value_counts().reset_index()
+        feedback_summary.columns = ["Feedback", "Count"]
+        bar = alt.Chart(feedback_summary).mark_bar().encode(
+            x="Feedback:N",
+            y="Count:Q",
+            color="Feedback:N"
         ).properties(width=400, height=200)
         st.altair_chart(bar)
 
-# Safe rerun
-if st.session_state.trigger_rerun:
-    st.session_state.trigger_rerun = False
-    st.experimental_rerun()
+
