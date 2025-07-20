@@ -142,11 +142,13 @@ if reset:
 if st.session_state.chat_history:
     st.markdown("## 💬 Conversation")
     for i, (q, a, timestamp) in enumerate(st.session_state.chat_history[-10:]):
+    # ✅ This line must be indented under the for loop
+    st.markdown(
+        f"<div style='text-align:center; color:gray; font-size:0.75rem'>{timestamp}</div>",
+        unsafe_allow_html=True
+    )
 
-    # Timestamp centered
-    st.markdown(f"<div style='text-align:center; color:gray; font-size:0.75rem'>{timestamp}</div>", unsafe_allow_html=True)
-
-    # User message (right aligned)
+    # User message
     user_html = f"""
     <div style='display:flex; justify-content:flex-end; margin-top:10px;'>
         <div style='background:#DCF8C6; padding:12px 16px; border-radius:16px 16px 0 16px; max-width:65%; box-shadow:0 2px 6px rgba(0,0,0,0.1);'>
@@ -155,6 +157,17 @@ if st.session_state.chat_history:
     </div>
     """
     st.markdown(user_html, unsafe_allow_html=True)
+
+    # Bot message
+    bot_html = f"""
+    <div style='display:flex; justify-content:flex-start; margin:10px 0;'>
+        <div style='background:#F1F0F0; padding:12px 16px; border-radius:16px 16px 16px 0; max-width:65%; box-shadow:0 2px 6px rgba(0,0,0,0.1);'>
+            🤖 <strong>Augmento</strong><br>{a}
+        </div>
+    </div>
+    """
+    st.markdown(bot_html, unsafe_allow_html=True)
+
 
     # Bot message (left aligned)
     bot_html = f"""
