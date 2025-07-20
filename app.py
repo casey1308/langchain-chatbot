@@ -5,6 +5,7 @@ import streamlit as st
 import csv
 import difflib
 import logging
+import pandas as pd
 from dotenv import load_dotenv
 from datetime import datetime
 from openai import OpenAIError
@@ -24,7 +25,7 @@ if not openai_api_key:
     st.stop()
 
 st.set_page_config(page_title="Augmento FAQ Chatbot", page_icon="💼", layout="wide")
-st.title("💼 Augmento FAQ Chatbot")
+st.title(":briefcase: Augmento FAQ Chatbot")
 
 # Session state
 if "chat_history" not in st.session_state:
@@ -37,31 +38,24 @@ if "chat_input" not in st.session_state:
 # FAQ categories
 faq_categories = {
     "Fundraising Process": {
-        "What documents are needed for fundraising?":
-            "You typically need a pitch deck, cap table, financial projections, and funding ask details.",
-        "What is your typical check size?":
-            "We invest ₹1.5–5 Cr depending on stage and traction.",
-        "Do you lead rounds or co-invest?":
-            "We lead, co-lead, or follow based on conviction and structure.",
+        "What documents are needed for fundraising?": "You typically need a pitch deck, cap table, financial projections, and funding ask details.",
+        "What is your typical check size?": "We invest ₹1.5–5 Cr depending on stage and traction.",
+        "Do you lead rounds or co-invest?": "We lead, co-lead, or follow based on conviction and structure."
     },
     "Evaluation & Due Diligence": {
-        "What is the due diligence process like?":
-            "We evaluate legal, financial, and business documentation.",
-        "How long does it take to get an investment decision?":
-            "Usually 3–6 weeks, depending on document readiness and team responsiveness.",
-        "Do you invest in pre-revenue startups?":
-            "Yes, if there’s a strong team and clear market need.",
+        "What is the due diligence process like?": "We evaluate legal, financial, and business documentation.",
+        "How long does it take to get an investment decision?": "Usually 3–6 weeks, depending on document readiness and team responsiveness.",
+        "Do you invest in pre-revenue startups?": "Yes, if there’s a strong team and clear market need."
     },
     "Investment Focus": {
-        "What sectors do you focus on?":
-            "We prefer tech-led consumer, B2B SaaS, healthtech, and sustainability sectors.",
+        "What sectors do you focus on?": "We prefer tech-led consumer, B2B SaaS, healthtech, and sustainability sectors."
     }
 }
 
 # Sidebar
-st.sidebar.title("⚙️ Settings")
-selected_category = st.sidebar.selectbox("📚 Choose FAQ Category", list(faq_categories.keys()))
-bot_style = st.sidebar.selectbox("🎭 Bot Mood", ["Formal VC", "Friendly Analyst", "Cool Mentor"])
+st.sidebar.title(":gear: Settings")
+selected_category = st.sidebar.selectbox(":books: Choose FAQ Category", list(faq_categories.keys()))
+bot_style = st.sidebar.selectbox(":performing_arts: Bot Mood", ["Formal VC", "Friendly Analyst", "Cool Mentor"])
 
 style_prompt_map = {
     "Formal VC": "Answer professionally like a VC during diligence.",
@@ -73,15 +67,15 @@ faq_data = faq_categories[selected_category]
 faq_questions = list(faq_data.keys())
 
 # User input
-user_input = st.text_input("💬 Ask your question:", value=st.session_state.chat_input, key="chat_input")
+user_input = st.text_input(":speech_balloon: Ask your question:", value=st.session_state.chat_input, key="chat_input")
 
 # Suggestions
 if user_input:
     suggestions = difflib.get_close_matches(user_input, faq_questions, n=3)
     if suggestions:
-        st.markdown("🔎 **Suggested Questions:**")
+        st.markdown(":mag: **Suggested Questions:**")
         for s in suggestions:
-            if st.button(f"👉 {s}", key=f"suggest_{s}"):
+            if st.button(f"🔜 {s}", key=f"suggest_{s}"):
                 st.session_state.chat_input = s
                 st.rerun()
 
@@ -108,8 +102,8 @@ if send and user_input.strip():
         prompt = f"""You are a startup investment chatbot.
 Use this tone: {tone}
 
-The user asked: "{user_input}"
-This matched FAQ: "{best_q}"
+The user asked: \"{user_input}\"
+This matched FAQ: \"{best_q}\"
 Provide a helpful answer.
 
 Answer:
@@ -125,12 +119,11 @@ Answer:
         st.session_state.chat_history.append((user_input, response.content, timestamp))
         st.session_state.last_question = best_q
 
-        # Append to CSV log
         with open("chat_log.csv", mode='a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow([timestamp, user_input, response.content, ""])
 
-        st.session_state.chat_input = ""  # reset input
+        st.session_state.chat_input = ""
         st.rerun()
 
     except OpenAIError as e:
@@ -142,16 +135,16 @@ if clear:
     st.session_state.chat_input = ""
     st.experimental_rerun()
 
-# Show conversation
+# Show chat history
 if st.session_state.chat_history:
-    st.markdown("## 🧾 Conversation")
+    st.markdown("## 📏 Conversation")
     for i, (q, a, timestamp) in enumerate(st.session_state.chat_history[-10:]):
         with st.chat_message("user"):
             st.markdown(f"**{timestamp}**  \n{q}")
         with st.chat_message("assistant"):
             st.markdown(a)
 
-                fb1, fb2, fb3 = st.columns(3)
+        fb1, fb2, fb3 = st.columns(3)
         if fb1.button("❤️", key=f"like_{i}"):
             with open("chat_log.csv", "r", encoding="utf-8") as f:
                 rows = list(csv.reader(f))
@@ -160,3 +153,43 @@ if st.session_state.chat_history:
                 writer = csv.writer(f)
                 writer.writerows(rows)
             st.success("Thanks for the love!")
+        if fb2.button("😐", key=f"neutral_{i}"):
+            with open("chat_log.csv", "r", encoding="utf-8") as f:
+                rows = list(csv.reader(f))
+            rows[-(i+1)][3] = "😐"
+            with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerows(rows)
+            st.info("Feedback noted.")
+        if fb3.button("👎", key=f"dislike_{i}"):
+            with open("chat_log.csv", "r", encoding="utf-8") as f:
+                rows = list(csv.reader(f))
+            rows[-(i+1)][3] = "👎"
+            with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerows(rows)
+            st.warning("We’ll improve.")
+
+# Analytics
+if os.path.exists("chat_log.csv"):
+    st.markdown("## 📊 Feedback Analytics")
+    df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
+    fb_counts = df["Feedback"].value_counts().to_dict()
+    most_asked = df["Question"].value_counts().head(3)
+
+    st.metric(label="❤️ Likes", value=fb_counts.get("❤️", 0))
+    st.metric(label="😐 Neutral", value=fb_counts.get("😐", 0))
+    st.metric(label="👎 Dislikes", value=fb_counts.get("👎", 0))
+
+    st.markdown("### 🔍 Most Frequently Asked")
+    for q, count in most_asked.items():
+        st.write(f"- {q} ({count} times)")
+
+# Recommend next questions
+if st.session_state.last_question:
+    st.markdown("### 👀 You might also want to ask:")
+    recos = [q for q in faq_questions if q != st.session_state.last_question][:2]
+    for r in recos:
+        if st.button(f"➕ {r}", key=f"rec_{r}"):
+            st.session_state.chat_input = r
+            st.rerun()
