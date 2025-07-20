@@ -151,5 +151,12 @@ if st.session_state.chat_history:
         with st.chat_message("assistant"):
             st.markdown(a)
 
-        fb1, fb2, fb3 = st.columns(3)
-        if fb1.button("❤️", key=f"like_{i}"_
+                fb1, fb2, fb3 = st.columns(3)
+        if fb1.button("❤️", key=f"like_{i}"):
+            with open("chat_log.csv", "r", encoding="utf-8") as f:
+                rows = list(csv.reader(f))
+            rows[-(i+1)][3] = "❤️"
+            with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerows(rows)
+            st.success("Thanks for the love!")
