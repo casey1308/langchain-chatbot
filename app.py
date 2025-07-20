@@ -155,3 +155,46 @@ if os.path.exists("chat_log.csv"):
     st.sidebar.markdown("### 📊 Feedback Summary")
     st.sidebar.metric("👍 Helpful", pos)
     st.sidebar.metric("👎 Not Helpful", neg)
+
+# 📊 Feedback Analytics
+st.sidebar.markdown("---")
+if st.sidebar.checkbox("📊 Show Feedback Analytics"):
+    st.subheader("📈 Feedback Analytics")
+
+    if os.path.exists("chat_log.csv"):
+        df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
+        df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+        
+        # Line chart of feedback over time
+        feedback_timeline = df[df["Feedback"].isin(["👍", "👎"])].copy()
+        feedback_timeline["Date"] = feedback_timeline["Timestamp"].dt.date
+        trend = feedback_timeline.groupby(["Date", "Feedback"]).size().reset_index(name="Count")
+
+        import altair as alt
+        chart = alt.Chart(trend).mark_line(point=True).encode(
+            x="Date:T",
+            y="Count:Q",
+            color="Feedback:N"
+        ).properties(width=700, height=300, title="Feedback Trend Over Time")
+
+        st.altair_chart(chart, use_container_width=True)
+
+        # Most liked questions
+        st.markdown("#### 🥇 Top Helpful Questions")
+        pos_df = df[df["Feedback"] == "👍"]["Question"].value_counts().head(5)
+        st.write(pos_df)
+
+        # Most disliked questions
+        st.markdown("#### ⚠️ Most Unhelpful Questions")
+        neg_df = df[df["Feedback"] == "👎"]["Question"].value_counts().head(5)
+        st.write(neg_df)
+
+        # Bar chart of feedback summary
+        feedback_summary = df["Feedback"].value_counts().reset_index()
+        feedback_summary.columns = ["Feedback", "Count"]
+        bar = alt.Chart(feedback_summary).mark_bar().encode(
+            x="Feedback:N",
+            y="Count:Q",
+            color="Feedback:N"
+        ).properties(width=400, height=200)
+        st.altair_chart(bar)
