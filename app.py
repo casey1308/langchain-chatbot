@@ -1,5 +1,5 @@
 import os
-os.environ["STREAMLIT_WATCHER_TYPE"] = "none"  # fix inotify error
+os.environ["STREAMLIT_WATCHER_TYPE"] = "none"  # prevent inotify error on Streamlit Cloud
 
 import streamlit as st
 import csv
@@ -9,20 +9,6 @@ from datetime import datetime
 from openai import OpenAIError
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
-from serpapi import GoogleSearch
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-
-import streamlit as st
-import os
-import csv
-import logging
-from dotenv import load_dotenv
-from datetime import datetime
-from openai import OpenAIError
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
-from serpapi import GoogleSearch
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -32,22 +18,19 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
-serp_api_key = os.getenv("SERPAPI_KEY")
 
 if not openai_api_key:
-    st.error("❌ Please add your OPENAI_API_KEY to the .env file.")
-    st.stop()
-if not serp_api_key:
-    st.error("❌ Please add your SERPAPI_KEY to the .env file.")
+    st.error("❌ Please add your OPENAI_API_KEY to the .env file or Streamlit Secrets.")
     st.stop()
 
-# Page config
+# Streamlit config
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
 st.title("💼 Investment Process FAQ Chatbot")
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
+# Static FAQ base
 faq_data = {
     "What documents are needed for fundraising?":
         "You typically need a pitch deck, cap table, financial projections, and details of your funding ask (amount, valuation, instrument).",
@@ -74,20 +57,6 @@ def get_best_faq_response(user_input):
     top_score = sims[top_index]
     return faq_questions[top_index], faq_data[faq_questions[top_index]], top_score
 
-def fetch_from_serpapi(query):
-    params = {
-        "engine": "google",
-        "q": query,
-        "api_key": serp_api_key
-    }
-    search = GoogleSearch(params)
-    results = search.get_dict()
-    if "answer_box" in results:
-        return results["answer_box"].get("answer") or results["answer_box"].get("snippet")
-    elif "organic_results" in results and results["organic_results"]:
-        return results["organic_results"][0].get("snippet")
-    return "Sorry, I couldn’t find any relevant results online."
-
 # UI
 st.header("💬 Ask a Question About Investment Process")
 user_input = st.text_input("Your question:", key="user_message")
@@ -103,19 +72,12 @@ if send and user_input.strip():
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.2)
         best_q, best_a, score = get_best_faq_response(user_input)
 
-        if score >= 0.4:
-            prompt = f"""You are a professional investment FAQ assistant. The user asked: "{user_input}"
+        prompt = f"""You are a professional investment FAQ assistant. The user asked: "{user_input}"
 This is the closest FAQ: "{best_q}"
 Answer concisely and expand slightly if helpful.
 
 Answer:
 {best_a}"""
-        else:
-            serp_result = fetch_from_serpapi(user_input)
-            prompt = f"""The user asked: "{user_input}"
-Here is some information from a web search:
-"{serp_result}"
-Use this to answer clearly and professionally."""
 
         with st.spinner("Thinking..."):
             response = llm.invoke([
@@ -126,10 +88,9 @@ Use this to answer clearly and professionally."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         st.session_state.chat_history.append((user_input, response.content, timestamp))
 
-        # Append to CSV log
         with open("chat_log.csv", mode='a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow([timestamp, user_input, response.content, ""])  # feedback empty for now
+            writer.writerow([timestamp, user_input, response.content, ""])
 
         st.rerun()
     except OpenAIError as e:
@@ -140,7 +101,7 @@ if reset:
     st.session_state.chat_history = []
     st.experimental_rerun()
 
-# Chat history + feedback
+# Display history and feedback
 if st.session_state.chat_history:
     st.subheader("📜 Chat History")
     for i, (q, a, timestamp) in enumerate(reversed(st.session_state.chat_history[-10:])):
@@ -153,7 +114,7 @@ if st.session_state.chat_history:
                     with open("chat_log.csv", "r", encoding="utf-8") as f:
                         rows = list(csv.reader(f))
                     rows[-(i+1)][3] = "👍"
-                    with open("chat_log.csv", "w", newline="", encoding="utf-8") as f:
+                    with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
                         writer = csv.writer(f)
                         writer.writerows(rows)
                     st.success("Thanks for your feedback!")
@@ -162,7 +123,7 @@ if st.session_state.chat_history:
                     with open("chat_log.csv", "r", encoding="utf-8") as f:
                         rows = list(csv.reader(f))
                     rows[-(i+1)][3] = "👎"
-                    with open("chat_log.csv", "w", newline="", encoding="utf-8") as f:
+                    with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
                         writer = csv.writer(f)
                         writer.writerows(rows)
                     st.warning("Feedback noted. Thank you!")
