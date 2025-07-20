@@ -4,8 +4,8 @@ os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
 import streamlit as st
 import csv
 import pandas as pd
-import logging
 import difflib
+import logging
 from dotenv import load_dotenv
 from datetime import datetime
 from openai import OpenAIError
@@ -27,13 +27,15 @@ if not openai_api_key:
 st.set_page_config(page_title="Augmento FAQ Chatbot", page_icon="💼", layout="wide")
 st.title("💼 Augmento FAQ Chatbot")
 
-# Session state
+# State
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "last_question" not in st.session_state:
     st.session_state.last_question = ""
+if "user_input" not in st.session_state:
+    st.session_state.user_input = ""
 
-# FAQ categories
+# FAQ data
 faq_categories = {
     "Fundraising Process": {
         "What documents are needed for fundraising?":
@@ -57,7 +59,7 @@ faq_categories = {
     }
 }
 
-# Sidebar settings
+# Sidebar
 st.sidebar.title("⚙️ Settings")
 selected_category = st.sidebar.selectbox("📚 Choose FAQ Category", list(faq_categories.keys()))
 bot_style = st.sidebar.selectbox("🎭 Bot Mood", ["Formal VC", "Friendly Analyst", "Cool Mentor"])
@@ -71,31 +73,32 @@ style_prompt_map = {
 faq_data = faq_categories[selected_category]
 faq_questions = list(faq_data.keys())
 
-# Autocomplete
-user_input = st.text_input("💬 Ask your question:", key="user_message")
-suggestions = difflib.get_close_matches(user_input, faq_questions, n=3) if user_input else []
+# Input box
+user_input = st.text_input("💬 Ask your question:", value=st.session_state.user_input, key="chat_input")
 
-if suggestions:
-    st.markdown("🔎 **Suggested Questions:**")
-    for s in suggestions:
-        if st.button(f"👉 {s}"):
-            user_input = s
-            st.session_state.user_message = user_input
-            st.rerun()
+# Suggestions
+if user_input:
+    suggestions = difflib.get_close_matches(user_input, faq_questions, n=3)
+    if suggestions:
+        st.markdown("🔎 **Suggested Questions:**")
+        for s in suggestions:
+            if st.button(f"👉 {s}", key=f"suggest_{s}"):
+                st.session_state["chat_input"] = s
+                st.rerun()
 
-# Match logic
+# Vector match
 def get_best_faq_response(query):
     vectorizer = TfidfVectorizer().fit_transform([query] + faq_questions)
     sims = cosine_similarity(vectorizer[0:1], vectorizer[1:]).flatten()
     top_index = sims.argmax()
     return faq_questions[top_index], faq_data[faq_questions[top_index]]
 
-# Action buttons
+# Buttons
 col1, col2 = st.columns([1, 4])
 with col1:
-    send = st.button("🚀 Send", type="primary")
+    send = st.button("🚀 Send")
 with col2:
-    reset = st.button("🗑️ Clear History")
+    clear = st.button("🗑️ Clear History")
 
 # Processing
 if send and user_input.strip():
@@ -127,24 +130,26 @@ Answer:
             writer = csv.writer(f)
             writer.writerow([timestamp, user_input, response.content, ""])
 
+        st.session_state["chat_input"] = ""
+
         st.rerun()
 
     except OpenAIError as e:
         st.error(f"❌ OpenAI Error: {str(e)}")
 
-# Clear chat
-if reset:
+if clear:
     st.session_state.chat_history = []
+    st.session_state["chat_input"] = ""
     st.experimental_rerun()
 
-# Display conversation
-# Display conversation
+# Show conversation
 if st.session_state.chat_history:
-    st.markdown("## 💬 Conversation")
+    st.markdown("## 🧾 Conversation")
     for i, (q, a, timestamp) in enumerate(st.session_state.chat_history[-10:]):
-        st.markdown(f"🕒 *{timestamp}*")
-        st.markdown(f"**🙋 You:** {q}")
-        st.markdown(f"**🤖 Augmento:** {a}")
+        with st.chat_message("user"):
+            st.markdown(f"**{timestamp}**  \n{q}")
+        with st.chat_message("assistant"):
+            st.markdown(a)
 
         fb1, fb2, fb3 = st.columns(3)
         if fb1.button("❤️", key=f"like_{i}"):
@@ -172,12 +177,11 @@ if st.session_state.chat_history:
                 writer.writerows(rows)
             st.warning("We’ll improve.")
 
-
-# Follow-up suggestions
+# Suggest next question
 if st.session_state.last_question:
     st.markdown("👀 **You might also want to ask:**")
     recos = [q for q in faq_questions if q != st.session_state.last_question][:2]
     for r in recos:
-        if st.button(f"➕ {r}"):
-            st.session_state.user_message = r
+        if st.button(f"➕ {r}", key=f"rec_{r}"):
+            st.session_state["chat_input"] = r
             st.rerun()
