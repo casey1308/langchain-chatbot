@@ -4,8 +4,8 @@ os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
 import streamlit as st
 import csv
 import pandas as pd
-import difflib
 import logging
+import difflib
 from dotenv import load_dotenv
 from datetime import datetime
 from openai import OpenAIError
@@ -27,15 +27,15 @@ if not openai_api_key:
 st.set_page_config(page_title="Augmento FAQ Chatbot", page_icon="💼", layout="wide")
 st.title("💼 Augmento FAQ Chatbot")
 
-# State
+# Initialize session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "last_question" not in st.session_state:
     st.session_state.last_question = ""
-if "user_input" not in st.session_state:
-    st.session_state.user_input = ""
+if "chat_input" not in st.session_state:
+    st.session_state.chat_input = ""
 
-# FAQ data
+# FAQ categories
 faq_categories = {
     "Fundraising Process": {
         "What documents are needed for fundraising?":
@@ -59,7 +59,7 @@ faq_categories = {
     }
 }
 
-# Sidebar
+# Sidebar controls
 st.sidebar.title("⚙️ Settings")
 selected_category = st.sidebar.selectbox("📚 Choose FAQ Category", list(faq_categories.keys()))
 bot_style = st.sidebar.selectbox("🎭 Bot Mood", ["Formal VC", "Friendly Analyst", "Cool Mentor"])
@@ -73,32 +73,30 @@ style_prompt_map = {
 faq_data = faq_categories[selected_category]
 faq_questions = list(faq_data.keys())
 
-# Input box
-user_input = st.text_input("💬 Ask your question:", value=st.session_state.user_input, key="chat_input")
+# Input + autocomplete
+user_input = st.text_input("💬 Ask your question:", key="chat_input")
+suggestions = difflib.get_close_matches(user_input, faq_questions, n=3) if user_input else []
 
-# Suggestions
-if user_input:
-    suggestions = difflib.get_close_matches(user_input, faq_questions, n=3)
-    if suggestions:
-        st.markdown("🔎 **Suggested Questions:**")
-        for s in suggestions:
-            if st.button(f"👉 {s}", key=f"suggest_{s}"):
-                st.session_state["chat_input"] = s
-                st.rerun()
+if suggestions:
+    st.markdown("🔎 **Suggested Questions:**")
+    for s in suggestions:
+        if st.button(f"👉 {s}"):
+            st.session_state.chat_input = s
+            st.experimental_rerun()
 
-# Vector match
+# Match logic
 def get_best_faq_response(query):
     vectorizer = TfidfVectorizer().fit_transform([query] + faq_questions)
     sims = cosine_similarity(vectorizer[0:1], vectorizer[1:]).flatten()
     top_index = sims.argmax()
     return faq_questions[top_index], faq_data[faq_questions[top_index]]
 
-# Buttons
+# Action buttons
 col1, col2 = st.columns([1, 4])
 with col1:
-    send = st.button("🚀 Send")
+    send = st.button("🚀 Send", type="primary")
 with col2:
-    clear = st.button("🗑️ Clear History")
+    reset = st.button("🗑️ Clear History")
 
 # Processing
 if send and user_input.strip():
@@ -130,26 +128,25 @@ Answer:
             writer = csv.writer(f)
             writer.writerow([timestamp, user_input, response.content, ""])
 
-        st.session_state["chat_input"] = ""
-
-        st.rerun()
+        st.session_state.chat_input = ""  # reset input
+        st.experimental_rerun()
 
     except OpenAIError as e:
         st.error(f"❌ OpenAI Error: {str(e)}")
 
-if clear:
+# Reset
+if reset:
     st.session_state.chat_history = []
-    st.session_state["chat_input"] = ""
+    st.session_state.chat_input = ""
     st.experimental_rerun()
 
-# Show conversation
+# Chat history
 if st.session_state.chat_history:
-    st.markdown("## 🧾 Conversation")
+    st.markdown("## 💬 Conversation")
     for i, (q, a, timestamp) in enumerate(st.session_state.chat_history[-10:]):
-        with st.chat_message("user"):
-            st.markdown(f"**{timestamp}**  \n{q}")
-        with st.chat_message("assistant"):
-            st.markdown(a)
+        st.markdown(f"🕒 *{timestamp}*")
+        st.markdown(f"**🙋 You:** {q}")
+        st.markdown(f"**🤖 Augmento:** {a}")
 
         fb1, fb2, fb3 = st.columns(3)
         if fb1.button("❤️", key=f"like_{i}"):
@@ -157,31 +154,28 @@ if st.session_state.chat_history:
                 rows = list(csv.reader(f))
             rows[-(i+1)][3] = "❤️"
             with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerows(rows)
+                csv.writer(f).writerows(rows)
             st.success("Thanks for the love!")
         if fb2.button("😐", key=f"neutral_{i}"):
             with open("chat_log.csv", "r", encoding="utf-8") as f:
                 rows = list(csv.reader(f))
             rows[-(i+1)][3] = "😐"
             with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerows(rows)
+                csv.writer(f).writerows(rows)
             st.info("Feedback noted.")
         if fb3.button("👎", key=f"dislike_{i}"):
             with open("chat_log.csv", "r", encoding="utf-8") as f:
                 rows = list(csv.reader(f))
             rows[-(i+1)][3] = "👎"
             with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerows(rows)
+                csv.writer(f).writerows(rows)
             st.warning("We’ll improve.")
 
-# Suggest next question
+# Suggestions
 if st.session_state.last_question:
     st.markdown("👀 **You might also want to ask:**")
     recos = [q for q in faq_questions if q != st.session_state.last_question][:2]
     for r in recos:
-        if st.button(f"➕ {r}", key=f"rec_{r}"):
-            st.session_state["chat_input"] = r
-            st.rerun()
+        if st.button(f"➕ {r}"):
+            st.session_state.chat_input = r
+            st.experimental_rerun()
