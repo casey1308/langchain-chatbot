@@ -24,6 +24,10 @@ if not openai_api_key:
     st.error("❌ OPENAI_API_KEY missing.")
     st.stop()
 
+# Page setup
+st.set_page_config(page_title="Augmento FAQ Chatbot", page_icon="💼", layout="wide")
+st.title("💼 Augmento FAQ Chatbot")
+
 # Session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -54,7 +58,7 @@ faq_categories = {
     }
 }
 
-# Sidebar mood selector
+# Sidebar settings
 st.sidebar.title("⚙️ Settings")
 selected_category = st.sidebar.selectbox("📚 Choose FAQ Category", list(faq_categories.keys()))
 bot_style = st.sidebar.selectbox("🎭 Bot Mood", ["Formal VC", "Friendly Analyst", "Cool Mentor"])
@@ -87,13 +91,14 @@ def get_best_faq_response(query):
     top_index = sims.argmax()
     return faq_questions[top_index], faq_data[faq_questions[top_index]]
 
-# Send message
+# Action buttons
 col1, col2 = st.columns([1, 4])
 with col1:
     send = st.button("🚀 Send", type="primary")
 with col2:
     reset = st.button("🗑️ Clear History")
 
+# Send message
 if send and user_input.strip():
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.2)
@@ -128,44 +133,62 @@ Answer:
     except OpenAIError as e:
         st.error(f"❌ OpenAI Error: {str(e)}")
 
-# Reset
+# Reset history
 if reset:
     st.session_state.chat_history = []
     st.experimental_rerun()
 
-# Display history
+# Display left-right styled chat
 if st.session_state.chat_history:
-    st.subheader("📜 Recent Conversations")
-    for i, (q, a, timestamp) in enumerate(reversed(st.session_state.chat_history[-10:])):
-        with st.expander(f"{i+1}. {q} ({timestamp})", expanded=(i == 0)):
-            st.markdown(f"**🤖 Answer:** {a}")
-            cols = st.columns(3)
-            if cols[0].button("❤️", key=f"like_{i}"):
-                with open("chat_log.csv", "r", encoding="utf-8") as f:
-                    rows = list(csv.reader(f))
-                rows[-(i+1)][3] = "❤️"
-                with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerows(rows)
-                st.success("Thanks for the love! 💌")
-            if cols[1].button("😐", key=f"neutral_{i}"):
-                with open("chat_log.csv", "r", encoding="utf-8") as f:
-                    rows = list(csv.reader(f))
-                rows[-(i+1)][3] = "😐"
-                with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerows(rows)
-                st.info("Got it! Appreciate your feedback.")
-            if cols[2].button("👎", key=f"dislike_{i}"):
-                with open("chat_log.csv", "r", encoding="utf-8") as f:
-                    rows = list(csv.reader(f))
-                rows[-(i+1)][3] = "👎"
-                with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerows(rows)
-                st.warning("Thanks, we’ll improve.")
+    st.markdown("## 💬 Conversation")
+    for i, (q, a, timestamp) in enumerate(st.session_state.chat_history[-10:]):
 
-# Follow-up Suggestion
+        st.markdown(f"<sub>{timestamp}</sub>", unsafe_allow_html=True)
+
+        # User on right
+        uc1, uc2 = st.columns([3, 1])
+        with uc2:
+            st.markdown(
+                f"<div style='background-color:#DCF8C6; padding:10px; border-radius:10px; text-align:right'><b>🙋 You:</b> {q}</div>",
+                unsafe_allow_html=True
+            )
+
+        # Bot on left
+        bc1, bc2 = st.columns([1, 3])
+        with bc1:
+            st.markdown(
+                f"<div style='background-color:#F1F0F0; padding:10px; border-radius:10px'><b>🤖 Augmento:</b> {a}</div>",
+                unsafe_allow_html=True
+            )
+
+        # Feedback
+        fb1, fb2, fb3 = st.columns(3)
+        if fb1.button("❤️", key=f"like_{i}"):
+            with open("chat_log.csv", "r", encoding="utf-8") as f:
+                rows = list(csv.reader(f))
+            rows[-(i+1)][3] = "❤️"
+            with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerows(rows)
+            st.success("Thanks for the love! 💌")
+        if fb2.button("😐", key=f"neutral_{i}"):
+            with open("chat_log.csv", "r", encoding="utf-8") as f:
+                rows = list(csv.reader(f))
+            rows[-(i+1)][3] = "😐"
+            with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerows(rows)
+            st.info("Feedback noted!")
+        if fb3.button("👎", key=f"dislike_{i}"):
+            with open("chat_log.csv", "r", encoding="utf-8") as f:
+                rows = list(csv.reader(f))
+            rows[-(i+1)][3] = "👎"
+            with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerows(rows)
+            st.warning("We’ll improve, thank you.")
+
+# Suggest next question
 if st.session_state.last_question:
     st.markdown("👀 **You might also want to ask:**")
     recos = [q for q in faq_questions if q != st.session_state.last_question][:2]
