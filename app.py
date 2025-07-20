@@ -13,6 +13,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import altair as alt
 
 # Setup
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +28,8 @@ if not openai_api_key:
 # Session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "trigger_reset" not in st.session_state:
+    st.session_state.trigger_reset = False
 
 # Categories
 faq_categories = {
@@ -52,13 +55,17 @@ faq_categories = {
     }
 }
 
-# Select category
+# App layout
+st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
+st.title("💼 Investment Process FAQ Chatbot")
+
+# Sidebar settings
 st.sidebar.title("📚 FAQ Category")
 selected_category = st.sidebar.selectbox("Choose a category", list(faq_categories.keys()))
 faq_data = faq_categories[selected_category]
 faq_questions = list(faq_data.keys())
 
-# Get best FAQ match
+# Vector match
 def get_best_faq_response(user_input):
     vectorizer = TfidfVectorizer().fit_transform([user_input] + faq_questions)
     sims = cosine_similarity(vectorizer[0:1], vectorizer[1:]).flatten()
@@ -66,12 +73,9 @@ def get_best_faq_response(user_input):
     top_score = sims[top_index]
     return faq_questions[top_index], faq_data[faq_questions[top_index]], top_score
 
-# Header and input
-st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
-st.title("💼 Investment Process FAQ Chatbot")
-
+# Input
 st.header("💬 Ask a Question")
-user_input = st.text_input("Your question:", key="user_message")
+user_input = st.text_input("Your question:", key="chat_input")
 
 col1, col2 = st.columns([1, 4])
 with col1:
@@ -79,14 +83,14 @@ with col1:
 with col2:
     reset = st.button("🗑️ Clear History")
 
-# Process user query
+# Process query
 if send and user_input.strip():
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.2)
         best_q, best_a, score = get_best_faq_response(user_input)
 
-        prompt = f"""You are a professional investment FAQ assistant. The user asked: "{user_input}"
-This is the closest FAQ: "{best_q}"
+        prompt = f"""You are a professional investment FAQ assistant. The user asked: \"{user_input}\"
+This is the closest FAQ: \"{best_q}\"
 Answer concisely and expand slightly if helpful.
 
 Answer:
@@ -105,22 +109,27 @@ Answer:
             writer = csv.writer(f)
             writer.writerow([timestamp, user_input, response.content, ""])
 
-        st.rerun()
+        st.session_state.trigger_reset = True
+        st.experimental_rerun()
     except OpenAIError as e:
         st.error(f"❌ OpenAI Error: {str(e)}")
 
-# Clear history
+# Reset logic
 if reset:
     st.session_state.chat_history = []
+    st.session_state.trigger_reset = True
     st.experimental_rerun()
+
+if st.session_state.trigger_reset:
+    st.session_state.chat_input = ""
+    st.session_state.trigger_reset = False
 
 # Display chat history
 if st.session_state.chat_history:
     st.subheader("📜 Chat History")
     for i, (q, a, timestamp) in enumerate(reversed(st.session_state.chat_history[-10:])):
         with st.expander(f"{i+1}. {q} ({timestamp})", expanded=(i == 0)):
-            st.markdown(f"**🤖 Answer:** {a}")
-
+            st.markdown(f"**🧠 Answer:** {a}")
             col1, col2 = st.columns(2)
             with col1:
                 if st.button(f"👍 Helpful", key=f"up_{i}"):
@@ -141,7 +150,7 @@ if st.session_state.chat_history:
                         writer.writerows(rows)
                     st.warning("Feedback noted. Thank you!")
 
-# Download Chat Log
+# Download Log
 if os.path.exists("chat_log.csv"):
     with open("chat_log.csv", "r", encoding="utf-8") as f:
         chat_log_data = f.read()
@@ -155,21 +164,15 @@ if os.path.exists("chat_log.csv"):
     st.sidebar.markdown("### 📊 Feedback Summary")
     st.sidebar.metric("👍 Helpful", pos)
     st.sidebar.metric("👎 Not Helpful", neg)
-# 📊 Feedback Analytics
-st.sidebar.markdown("---")
-if st.sidebar.checkbox("📊 Show Feedback Analytics"):
-    st.subheader("📈 Feedback Analytics")
 
-    if os.path.exists("chat_log.csv"):
-        df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
+    if st.sidebar.checkbox("📊 Show Feedback Analytics"):
+        st.subheader("📈 Feedback Analytics")
+
         df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-        
-        # Line chart of feedback over time
         feedback_timeline = df[df["Feedback"].isin(["👍", "👎"])].copy()
         feedback_timeline["Date"] = feedback_timeline["Timestamp"].dt.date
         trend = feedback_timeline.groupby(["Date", "Feedback"]).size().reset_index(name="Count")
 
-        import altair as alt
         chart = alt.Chart(trend).mark_line(point=True).encode(
             x="Date:T",
             y="Count:Q",
@@ -178,20 +181,15 @@ if st.sidebar.checkbox("📊 Show Feedback Analytics"):
 
         st.altair_chart(chart, use_container_width=True)
 
-        # Most liked questions
         st.markdown("#### 🥇 Top Helpful Questions")
-        pos_df = df[df["Feedback"] == "👍"]["Question"].value_counts().head(5)
-        st.write(pos_df)
+        st.write(df[df["Feedback"] == "👍"]["Question"].value_counts().head(5))
 
-        # Most disliked questions
         st.markdown("#### ⚠️ Most Unhelpful Questions")
-        neg_df = df[df["Feedback"] == "👎"]["Question"].value_counts().head(5)
-        st.write(neg_df)
+        st.write(df[df["Feedback"] == "👎"]["Question"].value_counts().head(5))
 
-        # Bar chart of feedback summary
-        feedback_summary = df["Feedback"].value_counts().reset_index()
-        feedback_summary.columns = ["Feedback", "Count"]
-        bar = alt.Chart(feedback_summary).mark_bar().encode(
+        summary = df["Feedback"].value_counts().reset_index()
+        summary.columns = ["Feedback", "Count"]
+        bar = alt.Chart(summary).mark_bar().encode(
             x="Feedback:N",
             y="Count:Q",
             color="Feedback:N"
