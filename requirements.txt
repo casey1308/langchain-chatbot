@@ -1,12 +1,6 @@
 streamlit
 openai
 langchain
+google-search-results
+scikit-learn
 python-dotenv
-streamlit_js_eval
-langchain-community
-langchain-openai
-tavily-python
-pypdf
-faiss-cpu
-PyPDF2
-streamlit-chat
