@@ -34,11 +34,6 @@ if "chat_input" not in st.session_state:
 if "last_question" not in st.session_state:
     st.session_state.last_question = ""
 
-# ✅ Safe rerun handler
-if st.session_state.get("_rerun_trigger"):
-    st.session_state._rerun_trigger = False
-    st.experimental_rerun()
-
 # Categories
 faq_categories = {
     "Fundraising Process": {
@@ -51,7 +46,7 @@ faq_categories = {
     },
     "Evaluation & Due Diligence": {
         "What is the due diligence process like?":
-            "Due diligence includes evaluating your legal, financial, and business details. We’ll request company registration docs, past financials, founder backgrounds, customer data, etc.",
+            "Due diligence includes evaluating your legal, financial, and business details. We'll request company registration docs, past financials, founder backgrounds, customer data, etc.",
         "How long does it take to get an investment decision?":
             "It typically takes 3–6 weeks from the first call to decision, depending on how quickly we receive documents and conduct diligence.",
         "Do you invest in pre-revenue startups?":
@@ -116,7 +111,9 @@ Answer:
             writer = csv.writer(f)
             writer.writerow([timestamp, user_input, response.content, ""])
 
-        st.session_state._rerun_trigger = True
+        # Clear the input after processing
+        st.session_state.user_message = ""
+        st.rerun()
 
     except OpenAIError as e:
         st.error(f"❌ OpenAI Error: {str(e)}")
@@ -124,7 +121,7 @@ Answer:
 # Clear history
 if reset:
     st.session_state.chat_history = []
-    st.session_state._rerun_trigger = True
+    st.rerun()
 
 # Display chat history
 if st.session_state.chat_history:
@@ -136,22 +133,30 @@ if st.session_state.chat_history:
             col1, col2 = st.columns(2)
             with col1:
                 if st.button(f"👍 Helpful", key=f"up_{i}"):
-                    with open("chat_log.csv", "r", encoding="utf-8") as f:
-                        rows = list(csv.reader(f))
-                    rows[-(i+1)][3] = "👍"
-                    with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                        writer = csv.writer(f)
-                        writer.writerows(rows)
-                    st.success("Thanks for your feedback!")
+                    try:
+                        with open("chat_log.csv", "r", encoding="utf-8") as f:
+                            rows = list(csv.reader(f))
+                        if len(rows) > i:
+                            rows[-(i+1)][3] = "👍"
+                            with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                                writer = csv.writer(f)
+                                writer.writerows(rows)
+                            st.success("Thanks for your feedback!")
+                    except (IndexError, FileNotFoundError):
+                        st.warning("Could not update feedback.")
             with col2:
                 if st.button(f"👎 Not Helpful", key=f"down_{i}"):
-                    with open("chat_log.csv", "r", encoding="utf-8") as f:
-                        rows = list(csv.reader(f))
-                    rows[-(i+1)][3] = "👎"
-                    with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                        writer = csv.writer(f)
-                        writer.writerows(rows)
-                    st.warning("Feedback noted. Thank you!")
+                    try:
+                        with open("chat_log.csv", "r", encoding="utf-8") as f:
+                            rows = list(csv.reader(f))
+                        if len(rows) > i:
+                            rows[-(i+1)][3] = "👎"
+                            with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                                writer = csv.writer(f)
+                                writer.writerows(rows)
+                            st.warning("Feedback noted. Thank you!")
+                    except (IndexError, FileNotFoundError):
+                        st.warning("Could not update feedback.")
 
 # Download Chat Log
 if os.path.exists("chat_log.csv"):
@@ -161,12 +166,15 @@ if os.path.exists("chat_log.csv"):
 
 # Feedback Summary
 if os.path.exists("chat_log.csv"):
-    df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
-    pos = df["Feedback"].value_counts().get("👍", 0)
-    neg = df["Feedback"].value_counts().get("👎", 0)
-    st.sidebar.markdown("### 📊 Feedback Summary")
-    st.sidebar.metric("👍 Helpful", pos)
-    st.sidebar.metric("👎 Not Helpful", neg)
+    try:
+        df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
+        pos = df["Feedback"].value_counts().get("👍", 0)
+        neg = df["Feedback"].value_counts().get("👎", 0)
+        st.sidebar.markdown("### 📊 Feedback Summary")
+        st.sidebar.metric("👍 Helpful", pos)
+        st.sidebar.metric("👎 Not Helpful", neg)
+    except Exception as e:
+        st.sidebar.warning("Could not load feedback summary.")
 
 # 📊 Feedback Analytics
 st.sidebar.markdown("---")
@@ -174,41 +182,50 @@ if st.sidebar.checkbox("📊 Show Feedback Analytics"):
     st.subheader("📈 Feedback Analytics")
 
     if os.path.exists("chat_log.csv"):
-        df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
-        df["Timestamp"] = pd.to_datetime(df["Timestamp"])
+        try:
+            df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
+            df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors='coerce')
 
-        # Line chart of feedback over time
-        feedback_timeline = df[df["Feedback"].isin(["👍", "👎"])]
-        feedback_timeline["Date"] = feedback_timeline["Timestamp"].dt.date
-        trend = feedback_timeline.groupby(["Date", "Feedback"]).size().reset_index(name="Count")
+            # Line chart of feedback over time
+            feedback_timeline = df[df["Feedback"].isin(["👍", "👎"])].copy()
+            if not feedback_timeline.empty:
+                feedback_timeline["Date"] = feedback_timeline["Timestamp"].dt.date
+                trend = feedback_timeline.groupby(["Date", "Feedback"]).size().reset_index(name="Count")
 
-        import altair as alt
-        chart = alt.Chart(trend).mark_line(point=True).encode(
-            x="Date:T",
-            y="Count:Q",
-            color="Feedback:N"
-        ).properties(width=700, height=300, title="Feedback Trend Over Time")
+                import altair as alt
+                chart = alt.Chart(trend).mark_line(point=True).encode(
+                    x="Date:T",
+                    y="Count:Q",
+                    color="Feedback:N"
+                ).properties(width=700, height=300, title="Feedback Trend Over Time")
 
-        st.altair_chart(chart, use_container_width=True)
+                st.altair_chart(chart, use_container_width=True)
 
-        # Most liked questions
-        st.markdown("#### 🥇 Top Helpful Questions")
-        pos_df = df[df["Feedback"] == "👍"]["Question"].value_counts().head(5)
-        st.write(pos_df)
+            # Most liked questions
+            st.markdown("#### 🥇 Top Helpful Questions")
+            pos_df = df[df["Feedback"] == "👍"]["Question"].value_counts().head(5)
+            if not pos_df.empty:
+                st.write(pos_df)
+            else:
+                st.write("No helpful feedback yet.")
 
-        # Most disliked questions
-        st.markdown("#### ⚠️ Most Unhelpful Questions")
-        neg_df = df[df["Feedback"] == "👎"]["Question"].value_counts().head(5)
-        st.write(neg_df)
+            # Most disliked questions
+            st.markdown("#### ⚠️ Most Unhelpful Questions")
+            neg_df = df[df["Feedback"] == "👎"]["Question"].value_counts().head(5)
+            if not neg_df.empty:
+                st.write(neg_df)
+            else:
+                st.write("No negative feedback yet.")
 
-        # Bar chart of feedback summary
-        feedback_summary = df["Feedback"].value_counts().reset_index()
-        feedback_summary.columns = ["Feedback", "Count"]
-        bar = alt.Chart(feedback_summary).mark_bar().encode(
-            x="Feedback:N",
-            y="Count:Q",
-            color="Feedback:N"
-        ).properties(width=400, height=200)
-        st.altair_chart(bar)
-
-
+            # Bar chart of feedback summary
+            feedback_summary = df["Feedback"].value_counts().reset_index()
+            if not feedback_summary.empty:
+                feedback_summary.columns = ["Feedback", "Count"]
+                bar = alt.Chart(feedback_summary).mark_bar().encode(
+                    x="Feedback:N",
+                    y="Count:Q",
+                    color="Feedback:N"
+                ).properties(width=400, height=200)
+                st.altair_chart(bar)
+        except Exception as e:
+            st.error(f"Could not load analytics: {str(e)}")
