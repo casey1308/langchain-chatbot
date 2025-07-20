@@ -5,9 +5,9 @@ import streamlit as st
 import csv
 import pandas as pd
 import logging
+import difflib
 from dotenv import load_dotenv
 from datetime import datetime
-from io import StringIO
 from openai import OpenAIError
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -21,180 +21,170 @@ load_dotenv()
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
 if not openai_api_key:
-    st.error("❌ Please add your OPENAI_API_KEY to the .env file or Secrets.")
+    st.error("❌ OPENAI_API_KEY missing.")
     st.stop()
 
 # Session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "last_question" not in st.session_state:
+    st.session_state.last_question = ""
 
-# Categories
+# FAQ categories
 faq_categories = {
     "Fundraising Process": {
         "What documents are needed for fundraising?":
-            "You typically need a pitch deck, cap table, financial projections, and details of your funding ask (amount, valuation, instrument).",
+            "You typically need a pitch deck, cap table, financial projections, and funding ask details.",
         "What is your typical check size?":
-            "We typically invest between ₹1.5 Cr to ₹5 Cr depending on the stage and category of the company.",
+            "We invest ₹1.5–5 Cr depending on stage and traction.",
         "Do you lead rounds or co-invest?":
-            "We are flexible. We can lead, co-lead, or follow depending on round dynamics and our conviction.",
+            "We lead, co-lead, or follow based on conviction and structure.",
     },
     "Evaluation & Due Diligence": {
         "What is the due diligence process like?":
-            "Due diligence includes evaluating your legal, financial, and business details. We’ll request company registration docs, past financials, founder backgrounds, customer data, etc.",
+            "We evaluate legal, financial, and business documentation.",
         "How long does it take to get an investment decision?":
-            "It typically takes 3–6 weeks from the first call to decision, depending on how quickly we receive documents and conduct diligence.",
+            "Usually 3–6 weeks, depending on document readiness and team responsiveness.",
         "Do you invest in pre-revenue startups?":
-            "Yes, we do evaluate pre-revenue startups if they are solving a clear problem with a strong founding team and early traction.",
+            "Yes, if there’s a strong team and clear market need.",
     },
     "Investment Focus": {
         "What sectors do you focus on?":
-            "We are sector-agnostic but have a preference for tech-led consumer businesses, B2B SaaS, healthtech, and sustainability.",
+            "We prefer tech-led consumer, B2B SaaS, healthtech, and sustainability sectors.",
     }
 }
 
-# Select category
-st.sidebar.title("📚 FAQ Category")
-selected_category = st.sidebar.selectbox("Choose a category", list(faq_categories.keys()))
+# Sidebar mood selector
+st.sidebar.title("⚙️ Settings")
+selected_category = st.sidebar.selectbox("📚 Choose FAQ Category", list(faq_categories.keys()))
+bot_style = st.sidebar.selectbox("🎭 Bot Mood", ["Formal VC", "Friendly Analyst", "Cool Mentor"])
+
+style_prompt_map = {
+    "Formal VC": "Answer professionally like a VC during diligence.",
+    "Friendly Analyst": "Be helpful and warm like an analyst helping a founder.",
+    "Cool Mentor": "Respond casually like a startup mentor talking to a peer."
+}
+
 faq_data = faq_categories[selected_category]
 faq_questions = list(faq_data.keys())
 
-# Get best FAQ match
-def get_best_faq_response(user_input):
-    vectorizer = TfidfVectorizer().fit_transform([user_input] + faq_questions)
+# Autocomplete suggestions
+user_input = st.text_input("💬 Ask your question:", key="user_message")
+
+suggestions = difflib.get_close_matches(user_input, faq_questions, n=3) if user_input else []
+
+if suggestions:
+    st.markdown("🔎 **Suggested Questions:**")
+    for s in suggestions:
+        if st.button(f"👉 {s}"):
+            user_input = s
+            st.session_state.user_message = user_input
+            st.rerun()
+
+# Search + match
+def get_best_faq_response(query):
+    vectorizer = TfidfVectorizer().fit_transform([query] + faq_questions)
     sims = cosine_similarity(vectorizer[0:1], vectorizer[1:]).flatten()
     top_index = sims.argmax()
     top_score = sims[top_index]
     return faq_questions[top_index], faq_data[faq_questions[top_index]], top_score
 
-# Header and input
-st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
-st.title("💼 Investment Process FAQ Chatbot")
-
-st.header("💬 Ask a Question")
-user_input = st.text_input("Your question:", key="user_message")
-
+# Send message
 col1, col2 = st.columns([1, 4])
 with col1:
-    send = st.button("Send", type="primary")
+    send = st.button("🚀 Send", type="primary")
 with col2:
     reset = st.button("🗑️ Clear History")
 
-# Process user query
 if send and user_input.strip():
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.2)
         best_q, best_a, score = get_best_faq_response(user_input)
 
-        prompt = f"""You are a professional investment FAQ assistant. The user asked: "{user_input}"
-This is the closest FAQ: "{best_q}"
-Answer concisely and expand slightly if helpful.
+        system_prompt = style_prompt_map.get(bot_style, "")
+        prompt = f"""You are a startup investment chatbot.
+Use this tone: {system_prompt}
+
+The user asked: "{user_input}"
+This matched FAQ: "{best_q}"
+Provide a helpful answer.
 
 Answer:
 {best_a}"""
 
-        with st.spinner("Thinking..."):
+        with st.spinner("🤖 Thinking..."):
             response = llm.invoke([
-                SystemMessage(content="Answer concisely and clearly."),
+                SystemMessage(content=system_prompt),
                 HumanMessage(content=prompt)
             ])
 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         st.session_state.chat_history.append((user_input, response.content, timestamp))
+        st.session_state.last_question = best_q
 
         with open("chat_log.csv", mode='a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerow([timestamp, user_input, response.content, ""])
 
         st.rerun()
+
     except OpenAIError as e:
         st.error(f"❌ OpenAI Error: {str(e)}")
 
-# Clear history
+# Reset
 if reset:
     st.session_state.chat_history = []
     st.experimental_rerun()
 
-# Display chat history
+# Display history
 if st.session_state.chat_history:
-    st.subheader("📜 Chat History")
+    st.subheader("📜 Recent Conversations")
     for i, (q, a, timestamp) in enumerate(reversed(st.session_state.chat_history[-10:])):
         with st.expander(f"{i+1}. {q} ({timestamp})", expanded=(i == 0)):
             st.markdown(f"**🤖 Answer:** {a}")
 
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button(f"👍 Helpful", key=f"up_{i}"):
-                    with open("chat_log.csv", "r", encoding="utf-8") as f:
-                        rows = list(csv.reader(f))
-                    rows[-(i+1)][3] = "👍"
-                    with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                        writer = csv.writer(f)
-                        writer.writerows(rows)
-                    st.success("Thanks for your feedback!")
-            with col2:
-                if st.button(f"👎 Not Helpful", key=f"down_{i}"):
-                    with open("chat_log.csv", "r", encoding="utf-8") as f:
-                        rows = list(csv.reader(f))
-                    rows[-(i+1)][3] = "👎"
-                    with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                        writer = csv.writer(f)
-                        writer.writerows(rows)
-                    st.warning("Feedback noted. Thank you!")
+            cols = st.columns(3)
+            if cols[0].button("❤️", key=f"like_{i}"):
+                with open("chat_log.csv", "r", encoding="utf-8") as f:
+                    rows = list(csv.reader(f))
+                rows[-(i+1)][3] = "❤️"
+                with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerows(rows)
+                st.success("Thanks for the love! 💌")
+            if cols[1].button("😐", key=f"neutral_{i}"):
+                with open("chat_log.csv", "r", encoding="utf-8") as f:
+                    rows = list(csv.reader(f))
+                rows[-(i+1)][3] = "😐"
+                with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerows(rows)
+                st.info("Got it! Appreciate your feedback.")
+            if cols[2].button("👎", key=f"dislike_{i}"):
+                with open("chat_log.csv", "r", encoding="utf-8") as f:
+                    rows = list(csv.reader(f))
+                rows[-(i+1)][3] = "👎"
+                with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerows(rows)
+                st.warning("Thanks, we’ll improve.")
 
-# Download Chat Log
-if os.path.exists("chat_log.csv"):
-    with open("chat_log.csv", "r", encoding="utf-8") as f:
-        chat_log_data = f.read()
-    st.download_button("📥 Export Chat Log", data=chat_log_data, file_name="chat_log.csv", mime="text/csv")
+# Follow-up Suggestion
+if st.session_state.last_question:
+    st.markdown("👀 **You might also want to ask:**")
+    recos = [q for q in faq_questions if q != st.session_state.last_question][:2]
+    for r in recos:
+        if st.button(f"➕ {r}"):
+            st.session_state.user_message = r
+            st.rerun()
 
-# Feedback Summary
-if os.path.exists("chat_log.csv"):
-    df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
-    pos = df["Feedback"].value_counts().get("👍", 0)
-    neg = df["Feedback"].value_counts().get("👎", 0)
-    st.sidebar.markdown("### 📊 Feedback Summary")
-    st.sidebar.metric("👍 Helpful", pos)
-    st.sidebar.metric("👎 Not Helpful", neg)
+# Investor Readiness Quiz
+with st.expander("🧠 Are you investor-ready? Take our 30-second quiz!"):
+    q1 = st.radio("Do you have a pitch deck?", ["Yes", "No"], key="quiz_q1")
+    q2 = st.radio("Have you raised funding before?", ["Yes", "No"], key="quiz_q2")
+    q3 = st.radio("Do you have a live product or MVP?", ["Yes", "No"], key="quiz_q3")
 
-# 📊 Feedback Analytics
-st.sidebar.markdown("---")
-if st.sidebar.checkbox("📊 Show Feedback Analytics"):
-    st.subheader("📈 Feedback Analytics")
-
-    if os.path.exists("chat_log.csv"):
-        df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
-        df["Timestamp"] = pd.to_datetime(df["Timestamp"])
-        
-        # Line chart of feedback over time
-        feedback_timeline = df[df["Feedback"].isin(["👍", "👎"])].copy()
-        feedback_timeline["Date"] = feedback_timeline["Timestamp"].dt.date
-        trend = feedback_timeline.groupby(["Date", "Feedback"]).size().reset_index(name="Count")
-
-        import altair as alt
-        chart = alt.Chart(trend).mark_line(point=True).encode(
-            x="Date:T",
-            y="Count:Q",
-            color="Feedback:N"
-        ).properties(width=700, height=300, title="Feedback Trend Over Time")
-
-        st.altair_chart(chart, use_container_width=True)
-
-        # Most liked questions
-        st.markdown("#### 🥇 Top Helpful Questions")
-        pos_df = df[df["Feedback"] == "👍"]["Question"].value_counts().head(5)
-        st.write(pos_df)
-
-        # Most disliked questions
-        st.markdown("#### ⚠️ Most Unhelpful Questions")
-        neg_df = df[df["Feedback"] == "👎"]["Question"].value_counts().head(5)
-        st.write(neg_df)
-
-        # Bar chart of feedback summary
-        feedback_summary = df["Feedback"].value_counts().reset_index()
-        feedback_summary.columns = ["Feedback", "Count"]
-        bar = alt.Chart(feedback_summary).mark_bar().encode(
-            x="Feedback:N",
-            y="Count:Q",
-            color="Feedback:N"
-        ).properties(width=400, height=200)
-        st.altair_chart(bar)
+    if st.button("Check Readiness"):
+        score = sum([q == "Yes" for q in [q1, q2, q3]])
+        readiness = score * 33
+        st.success(f"🎯 You are {readiness}% investment-ready!")
