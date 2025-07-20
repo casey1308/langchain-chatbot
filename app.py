@@ -1,14 +1,13 @@
 import streamlit as st
 import os
-import re
-from io import BytesIO
-from dotenv import load_dotenv
-import PyPDF2
+import csv
 import logging
+from dotenv import load_dotenv
 from datetime import datetime
 from openai import OpenAIError
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
+from serpapi import GoogleSearch
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -16,72 +15,67 @@ from sklearn.metrics.pairwise import cosine_similarity
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 load_dotenv()
+
 openai_api_key = os.getenv("OPENAI_API_KEY")
+serp_api_key = os.getenv("SERPAPI_KEY")
+
 if not openai_api_key:
     st.error("❌ Please add your OPENAI_API_KEY to the .env file.")
     st.stop()
+if not serp_api_key:
+    st.error("❌ Please add your SERPAPI_KEY to the .env file.")
+    st.stop()
 
-st.set_page_config(page_title="Augmento - RAG Chatbot", page_icon="🤖", layout="wide")
-st.title("🤖 Augmento – RAG-Enhanced Pitch Deck Chatbot")
+# Page config
+st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
+st.title("💼 Investment Process FAQ Chatbot")
 
-# Session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-if "pdf_text" not in st.session_state:
-    st.session_state.pdf_text = ""
-if "chunks" not in st.session_state:
-    st.session_state.chunks = []
 
-# Helper: Text cleaning
-def clean_text(text):
-    text = re.sub(r"(\w)-\n(\w)", r"\1\2", text)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
+faq_data = {
+    "What documents are needed for fundraising?":
+        "You typically need a pitch deck, cap table, financial projections, and details of your funding ask (amount, valuation, instrument).",
+    "What is the due diligence process like?":
+        "Due diligence includes evaluating your legal, financial, and business details. We’ll request company registration docs, past financials, founder backgrounds, customer data, etc.",
+    "How long does it take to get an investment decision?":
+        "It typically takes 3–6 weeks from the first call to decision, depending on how quickly we receive documents and conduct diligence.",
+    "Do you invest in pre-revenue startups?":
+        "Yes, we do evaluate pre-revenue startups if they are solving a clear problem with a strong founding team and early traction.",
+    "What is your typical check size?":
+        "We typically invest between ₹1.5 Cr to ₹5 Cr depending on the stage and category of the company.",
+    "Do you lead rounds or co-invest?":
+        "We are flexible. We can lead, co-lead, or follow depending on round dynamics and our conviction.",
+    "What sectors do you focus on?":
+        "We are sector-agnostic but have a preference for tech-led consumer businesses, B2B SaaS, healthtech, and sustainability.",
+}
 
-# PDF Text Extraction
-def extract_pdf_text(file_bytes):
-    try:
-        reader = PyPDF2.PdfReader(BytesIO(file_bytes))
-        text = "\n".join([page.extract_text() or "" for page in reader.pages])
-        return clean_text(text)
-    except Exception as e:
-        logger.error(f"PDF extraction error: {e}")
-        return ""
+faq_questions = list(faq_data.keys())
 
-# Text Chunking
-def chunk_text(text, chunk_size=800, overlap=100):
-    words = text.split()
-    chunks = []
-    i = 0
-    while i < len(words):
-        chunk = words[i:i + chunk_size]
-        chunks.append(" ".join(chunk))
-        i += chunk_size - overlap
-    return chunks
-
-# RAG-style retriever: get top chunk
-def get_relevant_chunk(query, chunks):
-    vectorizer = TfidfVectorizer().fit_transform([query] + chunks)
+def get_best_faq_response(user_input):
+    vectorizer = TfidfVectorizer().fit_transform([user_input] + faq_questions)
     sims = cosine_similarity(vectorizer[0:1], vectorizer[1:]).flatten()
     top_index = sims.argmax()
-    return chunks[top_index]
+    top_score = sims[top_index]
+    return faq_questions[top_index], faq_data[faq_questions[top_index]], top_score
 
-# Upload PDF
-st.sidebar.header("📄 Upload a Pitch Deck (Optional)")
-file = st.sidebar.file_uploader("Upload PDF", type=["pdf"])
-if file:
-    pdf_bytes = file.read()
-    parsed_text = extract_pdf_text(pdf_bytes)
-    if parsed_text:
-        st.session_state.pdf_text = parsed_text
-        st.session_state.chunks = chunk_text(parsed_text)
-        st.success("✅ PDF uploaded and processed with RAG.")
-    else:
-        st.warning("⚠️ Couldn't extract text from the PDF.")
+def fetch_from_serpapi(query):
+    params = {
+        "engine": "google",
+        "q": query,
+        "api_key": serp_api_key
+    }
+    search = GoogleSearch(params)
+    results = search.get_dict()
+    if "answer_box" in results:
+        return results["answer_box"].get("answer") or results["answer_box"].get("snippet")
+    elif "organic_results" in results and results["organic_results"]:
+        return results["organic_results"][0].get("snippet")
+    return "Sorry, I couldn’t find any relevant results online."
 
-# Chat
-st.header("💬 Chat Interface")
-user_input = st.text_input("Enter your message:", key="user_message")
+# UI
+st.header("💬 Ask a Question About Investment Process")
+user_input = st.text_input("Your question:", key="user_message")
 
 col1, col2 = st.columns([1, 4])
 with col1:
@@ -89,40 +83,71 @@ with col1:
 with col2:
     reset = st.button("🗑️ Clear History")
 
-# Message handling
 if send and user_input.strip():
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.2)
+        best_q, best_a, score = get_best_faq_response(user_input)
 
-        if st.session_state.chunks:
-            context = get_relevant_chunk(user_input, st.session_state.chunks)
+        if score >= 0.4:
+            prompt = f"""You are a professional investment FAQ assistant. The user asked: "{user_input}"
+This is the closest FAQ: "{best_q}"
+Answer concisely and expand slightly if helpful.
+
+Answer:
+{best_a}"""
         else:
-            context = ""
-
-        prompt = f"""You are a startup pitch analyst AI. Based only on the context below, answer the user query.
-Context:
-\"\"\"
-{context}
-\"\"\"
-
-User Question:
-{user_input}"""
+            serp_result = fetch_from_serpapi(user_input)
+            prompt = f"""The user asked: "{user_input}"
+Here is some information from a web search:
+"{serp_result}"
+Use this to answer clearly and professionally."""
 
         with st.spinner("Thinking..."):
-            response = llm.invoke([SystemMessage(content="Answer concisely and professionally."), HumanMessage(content=prompt)])
-        st.session_state.chat_history.append((user_input, response.content, datetime.now().strftime("%Y-%m-%d %H:%M")))
+            response = llm.invoke([
+                SystemMessage(content="Answer concisely and clearly."),
+                HumanMessage(content=prompt)
+            ])
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        st.session_state.chat_history.append((user_input, response.content, timestamp))
+
+        # Append to CSV log
+        with open("chat_log.csv", mode='a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([timestamp, user_input, response.content, ""])  # feedback empty for now
+
         st.rerun()
     except OpenAIError as e:
         st.error(f"❌ OpenAI Error: {str(e)}")
 
-# Reset history
+# Clear history
 if reset:
     st.session_state.chat_history = []
     st.experimental_rerun()
 
-# Show chat history
+# Chat history + feedback
 if st.session_state.chat_history:
     st.subheader("📜 Chat History")
     for i, (q, a, timestamp) in enumerate(reversed(st.session_state.chat_history[-10:])):
         with st.expander(f"{i+1}. {q} ({timestamp})", expanded=(i == 0)):
             st.markdown(f"**🤖 Answer:** {a}")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(f"👍 Helpful", key=f"up_{i}"):
+                    with open("chat_log.csv", "r", encoding="utf-8") as f:
+                        rows = list(csv.reader(f))
+                    rows[-(i+1)][3] = "👍"
+                    with open("chat_log.csv", "w", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f)
+                        writer.writerows(rows)
+                    st.success("Thanks for your feedback!")
+            with col2:
+                if st.button(f"👎 Not Helpful", key=f"down_{i}"):
+                    with open("chat_log.csv", "r", encoding="utf-8") as f:
+                        rows = list(csv.reader(f))
+                    rows[-(i+1)][3] = "👎"
+                    with open("chat_log.csv", "w", newline="", encoding="utf-8") as f:
+                        writer = csv.writer(f)
+                        writer.writerows(rows)
+                    st.warning("Feedback noted. Thank you!")
