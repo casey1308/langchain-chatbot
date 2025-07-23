@@ -412,24 +412,24 @@ if st.session_state.feedback_log:
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
 st.markdown("""
     <style>
-        /* Keep top padding minimal for main content */
+        /* Reduce main content top padding */
         .block-container {
             padding-top: 1rem !important;
         }
 
-        /* Remove excess top padding/margin from sidebar content */
+        /* Remove spacing above sidebar content */
         section[data-testid="stSidebar"] > div:first-child {
             padding-top: 0rem !important;
-            margin-top: 0rem !important;
+            margin-top: -1rem !important;
         }
 
-        /* 🛠️ Restore sidebar toggle (≡) visibility and placement */
+        /* Reposition sidebar toggle (≡) a bit lower */
         button[data-testid="collapsedControl"] {
             visibility: visible !important;
             display: block !important;
             position: fixed !important;
-            top: 0.5rem !important;
-            left: 0.5rem !important;
+            top: 3.2rem !important;  /* Moves it lower */
+            left: 0.7rem !important;
             z-index: 1001 !important;
             background-color: white !important;
             border: 1px solid #ccc !important;
@@ -439,12 +439,13 @@ st.markdown("""
             padding: 0 !important;
         }
 
-        /* Ensure no elements hide the button */
-        header, .main, .css-1outpf7 {
+        /* Prevent overlaps or hiding */
+        header, .main {
             z-index: auto !important;
         }
     </style>
 """, unsafe_allow_html=True)
+
 
 
 st.title("💼 Augmento- Your Investments Assistant")
