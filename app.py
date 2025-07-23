@@ -13,6 +13,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from langchain_community.tools import SerpAPIWrapper
 
 # Setup
 logging.basicConfig(level=logging.INFO)
@@ -20,9 +21,16 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
+serpapi_api_key = os.getenv("SERPAPI_API_KEY")
+
 if not openai_api_key:
     st.error("❌ Please add your OPENAI_API_KEY to the .env file or Secrets.")
     st.stop()
+if not serpapi_api_key:
+    st.error("❌ Please add your SERPAPI_API_KEY to the .env file or Secrets.")
+    st.stop()
+
+serp_tool = SerpAPIWrapper(serpapi_api_key=serpapi_api_key)
 
 # Session state
 if "chat_history" not in st.session_state:
@@ -72,11 +80,9 @@ st.title("💼 Investment Process FAQ Chatbot")
 
 st.header("💬 Ask a Question")
 
-# Initialize input clearing mechanism
 if "clear_input" not in st.session_state:
     st.session_state.clear_input = False
 
-# Use a unique key that gets reset
 input_key = "user_input"
 if st.session_state.clear_input:
     st.session_state.clear_input = False
@@ -91,7 +97,6 @@ with col1:
 with col2:
     reset = st.button("🗑️ Clear History")
 
-# Process user query
 if send and user_input.strip():
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.2)
@@ -110,130 +115,34 @@ Answer:
                 HumanMessage(content=prompt)
             ])
 
+        final_response = response.content
+
+        # Web search fallback if FAQ match is poor
+        if score < 0.3:
+            web_result = serp_tool.run(user_input)
+            final_response += f"\n\n🌐 Web Search Result:\n{web_result}"
+
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        st.session_state.chat_history.append((user_input, response.content, timestamp))
+        st.session_state.chat_history.append((user_input, final_response, timestamp))
 
         with open("chat_log.csv", mode='a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
-            writer.writerow([timestamp, user_input, response.content, ""])
+            writer.writerow([timestamp, user_input, final_response, ""])
 
-        # Trigger input clearing and rerun
         st.session_state.clear_input = True
         st.rerun()
 
     except OpenAIError as e:
         st.error(f"❌ OpenAI Error: {str(e)}")
+    except Exception as e:
+        st.error(f"❌ Unexpected Error: {str(e)}")
 
-# Clear history
 if reset:
     st.session_state.chat_history = []
     st.rerun()
 
-# Display chat history
 if st.session_state.chat_history:
     st.subheader("📜 Chat History")
     for i, (q, a, timestamp) in enumerate(reversed(st.session_state.chat_history[-10:])):
         with st.expander(f"{i+1}. {q} ({timestamp})", expanded=(i == 0)):
             st.markdown(f"**🤖 Answer:** {a}")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button(f"👍 Helpful", key=f"up_{i}"):
-                    try:
-                        with open("chat_log.csv", "r", encoding="utf-8") as f:
-                            rows = list(csv.reader(f))
-                        if len(rows) > i:
-                            rows[-(i+1)][3] = "👍"
-                            with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                                writer = csv.writer(f)
-                                writer.writerows(rows)
-                            st.success("Thanks for your feedback!")
-                    except (IndexError, FileNotFoundError):
-                        st.warning("Could not update feedback.")
-            with col2:
-                if st.button(f"👎 Not Helpful", key=f"down_{i}"):
-                    try:
-                        with open("chat_log.csv", "r", encoding="utf-8") as f:
-                            rows = list(csv.reader(f))
-                        if len(rows) > i:
-                            rows[-(i+1)][3] = "👎"
-                            with open("chat_log.csv", "w", newline='', encoding='utf-8') as f:
-                                writer = csv.writer(f)
-                                writer.writerows(rows)
-                            st.warning("Feedback noted. Thank you!")
-                    except (IndexError, FileNotFoundError):
-                        st.warning("Could not update feedback.")
-
-# Download Chat Log
-if os.path.exists("chat_log.csv"):
-    with open("chat_log.csv", "r", encoding="utf-8") as f:
-        chat_log_data = f.read()
-    st.download_button("📥 Export Chat Log", data=chat_log_data, file_name="chat_log.csv", mime="text/csv")
-
-# Feedback Summary
-if os.path.exists("chat_log.csv"):
-    try:
-        df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
-        pos = df["Feedback"].value_counts().get("👍", 0)
-        neg = df["Feedback"].value_counts().get("👎", 0)
-        st.sidebar.markdown("### 📊 Feedback Summary")
-        st.sidebar.metric("👍 Helpful", pos)
-        st.sidebar.metric("👎 Not Helpful", neg)
-    except Exception as e:
-        st.sidebar.warning("Could not load feedback summary.")
-
-# 📊 Feedback Analytics
-st.sidebar.markdown("---")
-if st.sidebar.checkbox("📊 Show Feedback Analytics"):
-    st.subheader("📈 Feedback Analytics")
-
-    if os.path.exists("chat_log.csv"):
-        try:
-            df = pd.read_csv("chat_log.csv", names=["Timestamp", "Question", "Answer", "Feedback"])
-            df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors='coerce')
-
-            # Line chart of feedback over time
-            feedback_timeline = df[df["Feedback"].isin(["👍", "👎"])].copy()
-            if not feedback_timeline.empty:
-                feedback_timeline["Date"] = feedback_timeline["Timestamp"].dt.date
-                trend = feedback_timeline.groupby(["Date", "Feedback"]).size().reset_index(name="Count")
-
-                import altair as alt
-                chart = alt.Chart(trend).mark_line(point=True).encode(
-                    x="Date:T",
-                    y="Count:Q",
-                    color="Feedback:N"
-                ).properties(width=700, height=300, title="Feedback Trend Over Time")
-
-                st.altair_chart(chart, use_container_width=True)
-
-            # Most liked questions
-            st.markdown("#### 🥇 Top Helpful Questions")
-            pos_df = df[df["Feedback"] == "👍"]["Question"].value_counts().head(5)
-            if not pos_df.empty:
-                st.write(pos_df)
-            else:
-                st.write("No helpful feedback yet.")
-
-            # Most disliked questions
-            st.markdown("#### ⚠️ Most Unhelpful Questions")
-            neg_df = df[df["Feedback"] == "👎"]["Question"].value_counts().head(5)
-            if not neg_df.empty:
-                st.write(neg_df)
-            else:
-                st.write("No negative feedback yet.")
-
-            # Bar chart of feedback summary
-            feedback_summary = df["Feedback"].value_counts().reset_index()
-            if not feedback_summary.empty:
-                feedback_summary.columns = ["Feedback", "Count"]
-                bar = alt.Chart(feedback_summary).mark_bar().encode(
-                    x="Feedback:N",
-                    y="Count:Q",
-                    color="Feedback:N"
-                ).properties(width=400, height=200)
-                st.altair_chart(bar)
-        except Exception as e:
-            st.error(f"Could not load analytics: {str(e)}")
-
-
