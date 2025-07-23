@@ -241,3 +241,21 @@ fundraising_faqs = faq_categories.get("Fundraising Process", {})
 for question, answer in fundraising_faqs.items():
     with st.expander(f"❓ {question}"):
         st.markdown(answer)
+
+# Show Feedback UI
+st.markdown("---")
+st.header("📊 Feedback Analytics")
+
+if st.session_state.feedback_log:
+    df_feedback = pd.DataFrame(st.session_state.feedback_log, columns=["timestamp", "question", "response", "rating"])
+    st.dataframe(df_feedback)
+
+    st.subheader("Average Feedback Score")
+    avg_rating = df_feedback['rating'].mean()
+    st.metric(label="Avg. Rating", value=f"{avg_rating:.2f} / 5")
+
+    st.subheader("Most Asked Questions")
+    most_asked = df_feedback['question'].value_counts().head(5)
+    st.bar_chart(most_asked)
+else:
+    st.info("No feedback yet. Engage with the chatbot and rate responses.")
