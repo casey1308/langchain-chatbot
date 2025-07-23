@@ -420,7 +420,7 @@ st.markdown("""
         /* Remove spacing above sidebar content */
         section[data-testid="stSidebar"] > div:first-child {
             padding-top: 0rem !important;
-            margin-top: -3rem !important;
+            margin-top: -2rem !important;
         }
 
         /* Reposition sidebar toggle (≡) a bit lower */
@@ -428,7 +428,7 @@ st.markdown("""
             visibility: visible !important;
             display: block !important;
             position: fixed !important;
-            top: 1rem !important;  /* Moves it lower */
+            top: 3rem !important;  /* Moves it lower */
             left: 0.7rem !important;
             z-index: 1001 !important;
             background-color: white !important;
