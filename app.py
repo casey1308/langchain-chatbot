@@ -414,11 +414,11 @@ st.markdown("""
     <style>
         /* Reduce top padding in main content */
         .block-container {
-            padding-top: 0.5rem !important;
+            padding-top: 1rem !important;
         }
         /* Remove sidebar top spacing */
         section[data-testid="stSidebar"] > div:first-child {
-            padding-top: 0rem !important;
+            padding-top: 1rem !important;
             margin-top: -1.5rem !important;
         }
     </style>
