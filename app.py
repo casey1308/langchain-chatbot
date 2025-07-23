@@ -410,6 +410,14 @@ if st.session_state.feedback_log:
 
 # Main UI
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
+st.markdown("""
+    <style>
+        .block-container {
+            padding-top: 1rem;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 st.title("💼 Augmento- Your Investments Assistant")
 st.markdown("*Ask questions about our investment process, evaluation criteria, and more!*")
 st.markdown("""
