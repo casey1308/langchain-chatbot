@@ -13,7 +13,14 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from langchain_community.tools import SerpAPIWrapper
+
+# Direct SerpAPI implementation without langchain_community
+try:
+    from serpapi import GoogleSearch
+    SERPAPI_AVAILABLE = True
+except ImportError:
+    SERPAPI_AVAILABLE = False
+    st.warning("⚠️ SerpAPI package not available. Web search will be disabled.")
 
 # Setup
 logging.basicConfig(level=logging.INFO)
@@ -26,24 +33,43 @@ serpapi_api_key = os.getenv("SERPAPI_API_KEY")
 if not openai_api_key:
     st.error("❌ Please add your OPENAI_API_KEY to the .env file or Secrets.")
     st.stop()
-if not serpapi_api_key:
-    st.error("❌ Please add your SERPAPI_API_KEY to the .env file or Secrets.")
-    st.stop()
 
-# Initialize SerpAPI with error handling
-try:
-    serp_tool = SerpAPIWrapper(serpapi_api_key=serpapi_api_key)
-    web_search_available = True
-except Exception as e:
-    logger.warning(f"SerpAPI initialization failed: {e}")
-    web_search_available = False
-    st.warning("⚠️ Web search is currently unavailable. Only FAQ responses will be provided.")
+# Web search function using direct SerpAPI
+def perform_web_search(query):
+    """Perform web search using SerpAPI directly"""
+    if not SERPAPI_AVAILABLE or not serpapi_api_key:
+        return "Web search is currently unavailable."
+    
+    try:
+        search = GoogleSearch({
+            "q": f"{query} startup investment venture capital",
+            "api_key": serpapi_api_key,
+            "num": 3  # Limit to 3 results
+        })
+        
+        results = search.get_dict()
+        
+        if "organic_results" in results:
+            formatted_results = []
+            for result in results["organic_results"][:3]:
+                title = result.get("title", "")
+                snippet = result.get("snippet", "")
+                if title and snippet:
+                    formatted_results.append(f"• {title}: {snippet}")
+            
+            return "\n".join(formatted_results) if formatted_results else "No relevant results found."
+        else:
+            return "No search results available."
+            
+    except Exception as e:
+        logger.error(f"Web search error: {e}")
+        return f"Web search temporarily unavailable: {str(e)}"
 
 # Session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Enhanced FAQ Categories with more comprehensive content
+# Enhanced FAQ Categories
 faq_categories = {
     "Fundraising Process": {
         "What documents are needed for fundraising?":
@@ -101,7 +127,7 @@ for i, question in enumerate(faq_questions, 1):
     st.sidebar.write(f"{i}. {question}")
 
 # Web search availability indicator
-if web_search_available:
+if SERPAPI_AVAILABLE and serpapi_api_key:
     st.sidebar.success("🌐 Web search: Available")
 else:
     st.sidebar.error("🌐 Web search: Unavailable")
@@ -131,23 +157,6 @@ def get_best_faq_response(user_input):
             all_answers[top_index], 
             question_categories[top_index],
             top_score)
-
-# Web search function with better formatting
-def perform_web_search(query):
-    try:
-        if not web_search_available:
-            return "Web search is currently unavailable."
-        
-        search_results = serp_tool.run(f"{query} startup investment venture capital")
-        
-        # Clean and format the search results
-        if len(search_results) > 500:
-            search_results = search_results[:500] + "..."
-        
-        return search_results
-    except Exception as e:
-        logger.error(f"Web search error: {e}")
-        return "Unable to perform web search at this time."
 
 # Main app interface
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
@@ -225,7 +234,7 @@ Keep the response professional and actionable."""
                 ])
                 
                 final_response = response.content
-                if web_search_available:
+                if SERPAPI_AVAILABLE and serpapi_api_key:
                     final_response += f"\n\n---\n🌐 **Web Search Context:** This response incorporates recent information from web search."
                 
                 response_type = "🌐 Web-Enhanced Response"
