@@ -2,8 +2,8 @@ streamlit
 openai
 langchain
 langchain-community
-chromadb
+serpapi
 python-dotenv
 pypdf
+chromadb
 scikit-learn
-serpapi
