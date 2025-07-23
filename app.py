@@ -428,7 +428,7 @@ st.markdown("""
             visibility: visible !important;
             display: block !important;
             position: fixed !important;
-            top: 3rem !important;  /* Moves it lower */
+            top: 1rem !important;  /* Moves it lower */
             left: 0.7rem !important;
             z-index: 1001 !important;
             background-color: white !important;
