@@ -29,10 +29,8 @@ if not openai_api_key:
 
 # Simple web search function using SerpAPI REST API
 def perform_web_search(query):
-    """Perform web search using SerpAPI REST API directly"""
     if not serpapi_api_key:
         return "Web search requires SERPAPI_API_KEY to be configured."
-    
     try:
         search_url = "https://serpapi.com/search"
         params = {
@@ -41,12 +39,9 @@ def perform_web_search(query):
             "engine": "google",
             "num": 3
         }
-        
         response = requests.get(search_url, params=params, timeout=10)
-        
         if response.status_code == 200:
             data = response.json()
-            
             if "organic_results" in data:
                 formatted_results = []
                 for result in data["organic_results"][:3]:
@@ -54,13 +49,11 @@ def perform_web_search(query):
                     snippet = result.get("snippet", "")
                     if title and snippet:
                         formatted_results.append(f"• {title}: {snippet}")
-                
                 return "\n".join(formatted_results) if formatted_results else "No relevant results found."
             else:
                 return "No search results available."
         else:
             return f"Search API returned status code: {response.status_code}"
-            
     except requests.exceptions.RequestException as e:
         logger.error(f"Web search request error: {e}")
         return "Web search temporarily unavailable due to network issues."
@@ -72,7 +65,7 @@ def perform_web_search(query):
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Enhanced FAQ Categories
+# FAQ Categories
 faq_categories = {
     "Fundraising Process": {
         "What documents are needed for fundraising?":
@@ -118,51 +111,41 @@ faq_categories = {
     }
 }
 
-# Rest of the code remains the same as the previous version...
-# [The UI and processing logic would be identical to the previous version]
-
 # Sidebar for category selection
 st.sidebar.title("📚 FAQ Categories")
 selected_category = st.sidebar.selectbox("Choose a category", list(faq_categories.keys()))
 faq_data = faq_categories[selected_category]
 faq_questions = list(faq_data.keys())
 
-# Display current category FAQs in sidebar
 st.sidebar.subheader(f"📋 {selected_category} FAQs")
 for i, question in enumerate(faq_questions, 1):
     st.sidebar.write(f"{i}. {question}")
 
-# Web search availability indicator
 if serpapi_api_key:
     st.sidebar.success("🌐 Web search: Available")
 else:
     st.sidebar.error("🌐 Web search: Unavailable (No API key)")
 
-# Enhanced FAQ matching function
+# FAQ matching
+
 def get_best_faq_response(user_input):
-    all_questions = []
-    all_answers = []
-    question_categories = []
-    
+    all_questions, all_answers, question_categories = [], [], []
     for category, qa_dict in faq_categories.items():
         for question, answer in qa_dict.items():
             all_questions.append(question)
             all_answers.append(answer)
             question_categories.append(category)
-    
+
     vectorizer = TfidfVectorizer(stop_words='english', ngram_range=(1, 2))
     vectors = vectorizer.fit_transform([user_input] + all_questions)
     similarities = cosine_similarity(vectors[0:1], vectors[1:]).flatten()
-    
+
     top_index = similarities.argmax()
     top_score = similarities[top_index]
-    
-    return (all_questions[top_index], 
-            all_answers[top_index], 
-            question_categories[top_index],
-            top_score)
 
-# Main app interface
+    return (all_questions[top_index], all_answers[top_index], question_categories[top_index], top_score)
+
+# Main UI
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
 st.title("💼 Investment Process FAQ Chatbot")
 st.markdown("*Ask questions about our investment process, evaluation criteria, and more!*")
@@ -178,9 +161,7 @@ if st.session_state.clear_input:
     if input_key in st.session_state:
         del st.session_state[input_key]
 
-user_input = st.text_input("Type your investment-related question here:", 
-                          key=input_key,
-                          placeholder="e.g., What documents do I need for fundraising?")
+user_input = st.text_input("Type your investment-related question here:", key=input_key, placeholder="e.g., What documents do I need for fundraising?")
 
 col1, col2 = st.columns([1, 1])
 with col1:
@@ -192,14 +173,14 @@ if send and user_input.strip():
     try:
         llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.3)
         best_question, best_answer, category, similarity_score = get_best_faq_response(user_input)
-        
+
         with st.spinner("Processing your question..."):
             if similarity_score >= 0.3:
-                prompt = f"""You are a professional investment advisor assistant. 
-                
-User Question: "{user_input}"
-Best Matching FAQ: "{best_question}" (Category: {category})
-FAQ Answer: "{best_answer}"
+                prompt = f"""You are a professional investment advisor assistant.
+
+User Question: \"{user_input}\"
+Best Matching FAQ: \"{best_question}\" (Category: {category})
+FAQ Answer: \"{best_answer}\"
 
 Provide a comprehensive response based on the FAQ answer. Keep it professional, helpful, and actionable."""
 
@@ -207,25 +188,21 @@ Provide a comprehensive response based on the FAQ answer. Keep it professional, 
                     SystemMessage(content="You are a knowledgeable investment advisor."),
                     HumanMessage(content=prompt)
                 ])
-                
+
                 final_response = response.content
                 response_type = f"📋 FAQ Response (Category: {category})"
-                
             else:
                 web_search_result = perform_web_search(user_input)
-                
                 prompt = f"""You are a professional investment advisor assistant.
 
-User Question: "{user_input}"
-Web Search Results: "{web_search_result}"
+User Question: \"{user_input}\"
+Web Search Results: \"{web_search_result}\"
 
 Use the web search results to provide a helpful response about startup investments, fundraising, or venture capital. Keep it professional and actionable."""
-
                 response = llm.invoke([
                     SystemMessage(content="You are a knowledgeable investment advisor."),
                     HumanMessage(content=prompt)
                 ])
-                
                 final_response = response.content + f"\n\n---\n🌐 **Enhanced with web search results**"
                 response_type = "🌐 Web-Enhanced Response"
 
@@ -253,10 +230,17 @@ if reset:
 if st.session_state.chat_history:
     st.header("📜 Recent Conversations")
     for i, (question, answer, timestamp, resp_type) in enumerate(reversed(st.session_state.chat_history[-10:])):
-        with st.expander(f"Q{len(st.session_state.chat_history)-i}: {question} ({timestamp})", 
-                         expanded=(i == 0)):
+        with st.expander(f"Q{len(st.session_state.chat_history)-i}: {question} ({timestamp})", expanded=(i == 0)):
             st.markdown(f"**{resp_type}**")
             st.markdown(f"**Answer:** {answer}")
 
 st.markdown("---")
 st.markdown("💡 **Tip:** Try asking about fundraising documents, evaluation criteria, investment focus, or due diligence process!")
+
+# 🔹 Fundraising FAQs Clickable Expanders
+st.markdown("---")
+st.header("📌 Fundraising FAQs (Click to Expand)")
+fundraising_faqs = faq_categories.get("Fundraising Process", {})
+for question, answer in fundraising_faqs.items():
+    with st.expander(f"❓ {question}"):
+        st.markdown(answer)
