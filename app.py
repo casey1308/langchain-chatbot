@@ -449,7 +449,7 @@ with main_tab:
 
     user_input = st.text_input("Type your investment-related question here:", key=input_key, placeholder="e.g., What documents do I need for fundraising?")
 
-    col1, col2 = st.columns([1, 0])
+    col1, col2 = st.columns([5,1])
     with col1:
         send = st.button("Send 📤", type="primary")
     with col2:
