@@ -419,7 +419,7 @@ st.markdown("""
         /* Remove sidebar top spacing */
         section[data-testid="stSidebar"] > div:first-child {
             padding-top: 1rem !important;
-            margin-top: 1rem !important;
+            margin-top: -3rem !important;
         }
     </style>
 """, unsafe_allow_html=True)
