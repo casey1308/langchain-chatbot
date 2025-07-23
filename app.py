@@ -410,8 +410,24 @@ if st.session_state.feedback_log:
 
 # Main UI
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
-st.title("💼 Investment Process FAQ Chatbot")
+st.title("💼 Augmento- Your Investments Assistant")
 st.markdown("*Ask questions about our investment process, evaluation criteria, and more!*")
+st.markdown("""
+    <script>
+    window.addEventListener('DOMContentLoaded', () => {
+        const inputBox = window.parent.document.querySelector('[data-testid="stTextInput"] input');
+        const sendBtn = window.parent.document.querySelector('button[kind="primary"]');
+        if (inputBox && sendBtn) {
+            inputBox.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    sendBtn.click();
+                }
+            });
+        }
+    });
+    </script>
+""", unsafe_allow_html=True)
 
 # Navigation tabs
 main_tab, analytics_tab = st.tabs(["💬 Chatbot", "📊 Analytics"])
