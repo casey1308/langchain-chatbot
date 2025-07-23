@@ -534,16 +534,19 @@ Use the web search results to provide a helpful response about startup investmen
                 st.markdown("---")
                 collect_feedback(question, answer, category, resp_type)
 
-   st.markdown("---")
+    # Render Quick FAQs based on category
+st.markdown("---")
 st.markdown("💡 **Tip:** Try asking about fundraising documents, evaluation criteria, investment focus, or due diligence process!")
 
 # Quick FAQ access
 st.markdown("---")
+
 if category_choice:
     st.header("📌 Quick FAQ Access")
     for q, a in faq_categories[category_choice].items():
         with st.expander(f"❓ {q}"):
             st.markdown(a)
+
 
 
 with analytics_tab:
