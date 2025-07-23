@@ -423,13 +423,16 @@ st.markdown("""
             margin-top: -4rem !important;
         }
 
-        /* Adjust sidebar toggle arrow */
+        /* Adjust sidebar toggle arrow (safe positioning) */
         button[data-testid="collapsedControl"] {
-            top: 0rem !important;        /* Position closer to the top */
-            margin-top: -4rem !important;
+            top: 1.5rem !important;     /* Fine-tune this as needed */
+            left: 0.25rem !important;
+            z-index: 1000;
+            visibility: visible !important;
         }
     </style>
 """, unsafe_allow_html=True)
+
 
 
 
