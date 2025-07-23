@@ -413,20 +413,20 @@ st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout
 st.title("💼 Augmento- Your Investments Assistant")
 st.markdown("*Ask questions about our investment process, evaluation criteria, and more!*")
 st.markdown("""
-    <script>
-    window.addEventListener('DOMContentLoaded', () => {
-        const inputBox = window.parent.document.querySelector('[data-testid="stTextInput"] input');
-        const sendBtn = window.parent.document.querySelector('button[kind="primary"]');
-        if (inputBox && sendBtn) {
-            inputBox.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    sendBtn.click();
-                }
-            });
-        }
-    });
-    </script>
+<script>
+document.addEventListener("keydown", function(event) {
+    const inputFocused = document.activeElement.tagName === 'INPUT';
+    const sendButtons = window.parent.document.querySelectorAll('button');
+    if (event.key === "Enter" && inputFocused) {
+        event.preventDefault();
+        sendButtons.forEach(btn => {
+            if (btn.innerText.includes("Send") || btn.innerText.includes("📤")) {
+                btn.click();
+            }
+        });
+    }
+});
+</script>
 """, unsafe_allow_html=True)
 
 # Navigation tabs
