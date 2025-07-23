@@ -412,12 +412,18 @@ if st.session_state.feedback_log:
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
 st.markdown("""
     <style>
+        /* Reduce top padding in main content */
+        .block-container {
+            padding-top: 0.5rem !important;
+        }
+        /* Remove sidebar top spacing */
         section[data-testid="stSidebar"] > div:first-child {
             padding-top: 0rem !important;
-            margin-top: 0rem !important;
+            margin-top: -1.5rem !important;
         }
     </style>
 """, unsafe_allow_html=True)
+
 
 
 st.title("💼 Augmento- Your Investments Assistant")
