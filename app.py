@@ -538,11 +538,12 @@ Use the web search results to provide a helpful response about startup investmen
     st.markdown("💡 **Tip:** Try asking about fundraising documents, evaluation criteria, investment focus, or due diligence process!")
 
     # Quick FAQ access
+ st.markdown("---")
+if 'category_choice' in locals():
     st.header("📌 Quick FAQ Access")
-for q, a in faq_categories[category_choice].items():
-    with st.expander(f"❓ {q}"):
-        st.markdown(a)
-
+    for q, a in faq_categories[category_choice].items():
+        with st.expander(f"❓ {q}"):
+            st.markdown(a)
 
 with analytics_tab:
     st.header("Feedback Analytics Dashboard")
