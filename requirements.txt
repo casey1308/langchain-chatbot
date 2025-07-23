@@ -1,9 +1,8 @@
 streamlit
 openai
 langchain
-langchain-openai
-langchain-core
-scikit-learn
+langchain-community
+chromadb
 python-dotenv
-pandas
-altair
+pypdf
+scikit-learn
