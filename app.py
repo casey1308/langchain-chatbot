@@ -16,6 +16,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from collections import Counter
+import hashlib
+
 
 # Setup
 logging.basicConfig(level=logging.INFO)
@@ -177,29 +179,30 @@ def get_best_faq_response(user_input):
 # Feedback collection function
 def collect_feedback(question, response, category, response_type):
     st.subheader("📝 Rate this response")
-    
-    feedback_key = f"feedback_{len(st.session_state.chat_history)}"
-    
+
+    # Generate a unique hash key based on the question + response
+    hash_key = hashlib.md5(f"{question}_{response}".encode()).hexdigest()[:10]
+
     col1, col2 = st.columns([3, 2])
-    
+
     with col1:
         rating = st.radio(
             "How helpful was this response?",
             options=[1, 2, 3, 4, 5],
             format_func=lambda x: "⭐" * x + " " + ["Very Poor", "Poor", "Average", "Good", "Excellent"][x-1],
-            key=f"rating_{feedback_key}",
+            key=f"rating_{hash_key}",
             horizontal=True
         )
-    
+
     with col2:
-        submit_feedback = st.button("Submit Feedback", key=f"submit_{feedback_key}")
-    
+        submit_feedback = st.button("Submit Feedback", key=f"submit_{hash_key}")
+
     comments = st.text_area(
         "Additional comments (optional):",
-        key=f"comments_{feedback_key}",
+        key=f"comments_{hash_key}",
         placeholder="Any specific feedback or suggestions..."
     )
-    
+
     if submit_feedback:
         feedback_entry = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -210,12 +213,14 @@ def collect_feedback(question, response, category, response_type):
             "response_type": response_type,
             "comments": comments
         }
-        
+
         st.session_state.feedback_log.append(feedback_entry)
         save_feedback_to_csv(feedback_entry)
-        
+
         st.success("Thank you for your feedback! 🙏")
-        st.balloons()
+        
+        if rating == 5:
+            st.balloons()
 
 # Analytics functions
 def display_analytics():
@@ -587,3 +592,4 @@ for question, answer in faq_categories[selected_category].items():
 with analytics_tab:
     st.header("Feedback Analytics Dashboard")
     display_analytics()
+
