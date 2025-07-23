@@ -412,36 +412,40 @@ if st.session_state.feedback_log:
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
 st.markdown("""
     <style>
-        /* Main container top padding fix */
+        /* Keep top padding minimal for main content */
         .block-container {
             padding-top: 1rem !important;
         }
 
-        /* Sidebar top spacing fix */
+        /* Remove excess top padding/margin from sidebar content */
         section[data-testid="stSidebar"] > div:first-child {
             padding-top: 0rem !important;
-            margin-top: -3rem !important;
+            margin-top: 0rem !important;
         }
 
-        /* Ensure sidebar toggle arrow (≡) is visible and clickable */
+        /* 🛠️ Restore sidebar toggle (≡) visibility and placement */
         button[data-testid="collapsedControl"] {
-            position: fixed !important;
-            top: 1rem !important;
-            left: 1rem !important;
-            z-index: 9999 !important;
             visibility: visible !important;
-            opacity: 1 !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            background: white !important;
+            display: block !important;
+            position: fixed !important;
+            top: 0.5rem !important;
+            left: 0.5rem !important;
+            z-index: 1001 !important;
+            background-color: white !important;
             border: 1px solid #ccc !important;
             border-radius: 6px !important;
-            width: 2.5rem;
-            height: 2.5rem;
+            width: 2.2rem;
+            height: 2.2rem;
+            padding: 0 !important;
+        }
+
+        /* Ensure no elements hide the button */
+        header, .main, .css-1outpf7 {
+            z-index: auto !important;
         }
     </style>
 """, unsafe_allow_html=True)
+
 
 st.title("💼 Augmento- Your Investments Assistant")
 st.markdown("*Ask questions about our investment process, evaluation criteria, and more!*")
