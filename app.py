@@ -412,33 +412,36 @@ if st.session_state.feedback_log:
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
 st.markdown("""
     <style>
-        /* 1. Remove extra space above main container */
+        /* Main container top padding fix */
         .block-container {
             padding-top: 1rem !important;
         }
 
-        /* 2. Remove extra space above sidebar content */
+        /* Sidebar top spacing fix */
         section[data-testid="stSidebar"] > div:first-child {
             padding-top: 0rem !important;
             margin-top: -3rem !important;
         }
 
-        /* 3. Restore and reposition sidebar toggle arrow */
+        /* Ensure sidebar toggle arrow (≡) is visible and clickable */
         button[data-testid="collapsedControl"] {
-            position: absolute !important;
-            top: 0.5rem !important;
-            left: 0.5rem !important;
-            z-index: 1000 !important;
+            position: fixed !important;
+            top: 1rem !important;
+            left: 1rem !important;
+            z-index: 9999 !important;
             visibility: visible !important;
-            display: block !important;
+            opacity: 1 !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            background: white !important;
+            border: 1px solid #ccc !important;
+            border-radius: 6px !important;
+            width: 2.5rem;
+            height: 2.5rem;
         }
     </style>
 """, unsafe_allow_html=True)
-
-
-
-
-
 
 st.title("💼 Augmento- Your Investments Assistant")
 st.markdown("*Ask questions about our investment process, evaluation criteria, and more!*")
