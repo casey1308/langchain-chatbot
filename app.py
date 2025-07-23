@@ -225,33 +225,35 @@ def collect_feedback(question, response, category, response_type):
 # Analytics functions
 def display_analytics():
     if not st.session_state.feedback_log:
-        st.info("📊 No feedback data available yet.")
+        st.info("📊 No feedback data available yet. Start asking questions and rating responses to see analytics!")
         return
-
-    df_feedback = pd.DataFrame(st.session_state.feedback_log)  # ✅ Define it first
+    
+    df_feedback = pd.DataFrame(st.session_state.feedback_log)
+    
+    # Convert timestamp to datetime
     df_feedback['timestamp'] = pd.to_datetime(df_feedback['timestamp'])
-
-    # 💡 Mobile-friendly layout with 2 columns per row
-    row1_col1, row1_col2 = st.columns(2)
-    row2_col1, row2_col2 = st.columns(2)
-
-    with row1_col1:
+    df_feedback['date'] = df_feedback['timestamp'].dt.date
+    df_feedback['hour'] = df_feedback['timestamp'].dt.hour
+    
+    # Main metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
         avg_rating = df_feedback['rating'].mean()
-        delta = avg_rating - 3
-        st.metric("📊 Average Rating", f"{avg_rating:.2f}/5", delta=f"{delta:+.2f}")
-
-    with row1_col2:
+        st.metric("📊 Average Rating", f"{avg_rating:.2f}/5", 
+                 delta=f"{avg_rating-3:.2f}" if avg_rating >= 3 else f"{avg_rating-3:.2f}")
+    
+    with col2:
         total_feedback = len(df_feedback)
         st.metric("📝 Total Responses", total_feedback)
-
-    with row2_col1:
+    
+    with col3:
         satisfaction_rate = (df_feedback['rating'] >= 4).mean() * 100
         st.metric("😊 Satisfaction Rate", f"{satisfaction_rate:.1f}%")
-
-    with row2_col2:
+    
+    with col4:
         recent_feedback = df_feedback[df_feedback['timestamp'] >= datetime.now() - timedelta(days=7)]
         st.metric("📅 This Week", len(recent_feedback))
-
     
     # Charts using Streamlit's built-in charting
     tab1, tab2, tab3, tab4 = st.tabs(["📈 Ratings", "📋 Categories", "🕐 Activity", "💬 Comments"])
@@ -407,12 +409,9 @@ if st.session_state.feedback_log:
     st.sidebar.markdown("---")
     st.sidebar.subheader("Quick Stats")
     df_temp = pd.DataFrame(st.session_state.feedback_log)
-    
-    avg_rating = df_temp['rating'].mean()  # ✅ FIXED
+    avg_rating = df_temp['rating'].mean()
     st.sidebar.metric("Avg Rating", f"{avg_rating:.1f}⭐")
     st.sidebar.metric("Total Feedback", len(df_temp))
-
-
 
 # Main UI
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
@@ -593,4 +592,6 @@ for question, answer in faq_categories[selected_category].items():
 with analytics_tab:
     st.header("Feedback Analytics Dashboard")
     display_analytics()
+
+
 
