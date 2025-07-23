@@ -28,6 +28,18 @@ serpapi_api_key = os.getenv("SERPAPI_API_KEY")
 if not openai_api_key:
     st.error("❌ Please add your OPENAI_API_KEY to the .env file or Secrets.")
     st.stop()
+    
+    st.markdown("""
+    <style>
+        .block-container {
+            padding-top: 1rem;
+        }
+        section[data-testid="stSidebar"] div[class^="css-"],
+        section[data-testid="stSidebar"] > div:first-child {
+            padding-top: 0.5rem;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # Simple web search function using SerpAPI REST API
 def perform_web_search(query):
