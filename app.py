@@ -412,17 +412,25 @@ if st.session_state.feedback_log:
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
 st.markdown("""
     <style>
-        /* Reduce top padding in main content */
+        /* Reduce main content top padding */
         .block-container {
             padding-top: 1rem !important;
         }
-        /* Remove sidebar top spacing */
+
+        /* Remove top space above sidebar content (FAQ Categories) */
         section[data-testid="stSidebar"] > div:first-child {
-            padding-top: 1rem !important;
-            margin-top: -3rem !important;
+            padding-top: 0rem !important;
+            margin-top: -4rem !important;
+        }
+
+        /* Adjust sidebar toggle arrow */
+        button[data-testid="collapsedControl"] {
+            top: 0rem !important;        /* Position closer to the top */
+            margin-top: -4rem !important;
         }
     </style>
 """, unsafe_allow_html=True)
+
 
 
 
