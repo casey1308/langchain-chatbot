@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from openai import OpenAIError
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
-from langchain_community.tools import SerpAPIWrapper
+from langchain_community.tools.serpapi.tool import SerpAPIWrapper
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.schema import Document
