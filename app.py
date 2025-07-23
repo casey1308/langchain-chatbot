@@ -412,9 +412,11 @@ if st.session_state.feedback_log:
     st.sidebar.markdown("---")
     st.sidebar.subheader("Quick Stats")
     df_temp = pd.DataFrame(st.session_state.feedback_log)
-    avg_rating = df_temp['rating'].mean()
+    
+    avg_rating = df_temp['rating'].mean()  # ✅ FIXED
     st.sidebar.metric("Avg Rating", f"{avg_rating:.1f}⭐")
     st.sidebar.metric("Total Feedback", len(df_temp))
+
 
 
 # Main UI
