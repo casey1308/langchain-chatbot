@@ -420,7 +420,7 @@ st.markdown("""
         /* Remove spacing above sidebar content */
         section[data-testid="stSidebar"] > div:first-child {
             padding-top: 0rem !important;
-            margin-top: -1.5rem !important;
+            margin-top: -1rem !important;
         }
 
         /* Reposition sidebar toggle (≡) a bit lower */
