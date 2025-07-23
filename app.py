@@ -388,7 +388,7 @@ def display_analytics():
         )
 
 # Sidebar
-st.sidebar.title("📚 FAQ Categories")
+st.sidebar.title("FAQ Categories")
 selected_category = st.sidebar.selectbox("Choose a category", list(faq_categories.keys()))
 faq_data = faq_categories[selected_category]
 faq_questions = list(faq_data.keys())
@@ -402,7 +402,7 @@ st.sidebar.info("🌐 Web search: Enabled for investment topics.")
 # Analytics in sidebar
 if st.session_state.feedback_log:
     st.sidebar.markdown("---")
-    st.sidebar.subheader("📊 Quick Stats")
+    st.sidebar.subheader("Quick Stats")
     df_temp = pd.DataFrame(st.session_state.feedback_log)
     avg_rating = df_temp['rating'].mean()
     st.sidebar.metric("Avg Rating", f"{avg_rating:.1f}⭐")
@@ -436,7 +436,7 @@ window.addEventListener("load", () => {
 main_tab, analytics_tab = st.tabs(["💬 Chatbot", "📊 Analytics"])
 
 with main_tab:
-    st.header("💬 Ask Your Question")
+    st.header("Ask Your Question")
 
     if "clear_input" not in st.session_state:
         st.session_state.clear_input = False
@@ -451,9 +451,9 @@ with main_tab:
 
     col1, col2 = st.columns([5,1])
     with col1:
-        send = st.button("Send 📤", type="primary")
+        send = st.button("Send", type="primary")
     with col2:
-        reset = st.button("Clear History 🗑️")
+        reset = st.button("Clear History")
 
     if send and user_input.strip():
         try:
@@ -546,5 +546,5 @@ Use the web search results to provide a helpful response about startup investmen
             st.markdown(answer)
 
 with analytics_tab:
-    st.header("📊 Feedback Analytics Dashboard")
+    st.header("Feedback Analytics Dashboard")
     display_analytics()
