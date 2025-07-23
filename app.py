@@ -79,7 +79,7 @@ if uploaded_files and st.sidebar.button("🔄 Process Documents"):
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         splits = text_splitter.split_documents(all_docs)
         embeddings = OpenAIEmbeddings()
-        vector_store = FAISS.from_documents(splits, embeddings)
+        vector_store = Chroma.from_documents(splits, embeddings)
         st.session_state.vector_store = vector_store
         st.session_state.uploaded_docs = [file.name for file in uploaded_files]
         st.sidebar.success(f"✅ Processed {len(uploaded_files)} document(s)")
