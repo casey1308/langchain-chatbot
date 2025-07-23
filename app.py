@@ -416,6 +416,7 @@ if st.session_state.feedback_log:
     st.sidebar.metric("Avg Rating", f"{avg_rating:.1f}⭐")
     st.sidebar.metric("Total Feedback", len(df_temp))
 
+
 # Main UI
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
 st.markdown("""
@@ -595,3 +596,4 @@ for question, answer in faq_categories[selected_category].items():
 with analytics_tab:
     st.header("Feedback Analytics Dashboard")
     display_analytics()
+
