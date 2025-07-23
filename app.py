@@ -225,37 +225,32 @@ def collect_feedback(question, response, category, response_type):
 # Analytics functions
 def display_analytics():
     if not st.session_state.feedback_log:
-        st.info("📊 No feedback data available yet. Start asking questions and rating responses to see analytics!")
+        st.info("📊 No feedback data available yet.")
         return
-    
-    df_feedback = pd.DataFrame(st.session_state.feedback_log)
-    
-    # Convert timestamp to datetime
+
+    df_feedback = pd.DataFrame(st.session_state.feedback_log)  # ✅ Define it first
     df_feedback['timestamp'] = pd.to_datetime(df_feedback['timestamp'])
-    df_feedback['date'] = df_feedback['timestamp'].dt.date
-    df_feedback['hour'] = df_feedback['timestamp'].dt.hour
-    
-    # Main metrics
-    # Split into two rows of two columns each for better mobile layout
-row1_col1, row1_col2 = st.columns(2)
-row2_col1, row2_col2 = st.columns(2)
 
-with row1_col1:
-    avg_rating = df_feedback['rating'].mean()
-    delta = avg_rating - 3
-    st.metric("📊 Average Rating", f"{avg_rating:.2f}/5", delta=f"{delta:+.2f}")
+    # 💡 Mobile-friendly layout with 2 columns per row
+    row1_col1, row1_col2 = st.columns(2)
+    row2_col1, row2_col2 = st.columns(2)
 
-with row1_col2:
-    total_feedback = len(df_feedback)
-    st.metric("📝 Total Responses", total_feedback)
+    with row1_col1:
+        avg_rating = df_feedback['rating'].mean()
+        delta = avg_rating - 3
+        st.metric("📊 Average Rating", f"{avg_rating:.2f}/5", delta=f"{delta:+.2f}")
 
-with row2_col1:
-    satisfaction_rate = (df_feedback['rating'] >= 4).mean() * 100
-    st.metric("😊 Satisfaction Rate", f"{satisfaction_rate:.1f}%")
+    with row1_col2:
+        total_feedback = len(df_feedback)
+        st.metric("📝 Total Responses", total_feedback)
 
-with row2_col2:
-    recent_feedback = df_feedback[df_feedback['timestamp'] >= datetime.now() - timedelta(days=7)]
-    st.metric("📅 This Week", len(recent_feedback))
+    with row2_col1:
+        satisfaction_rate = (df_feedback['rating'] >= 4).mean() * 100
+        st.metric("😊 Satisfaction Rate", f"{satisfaction_rate:.1f}%")
+
+    with row2_col2:
+        recent_feedback = df_feedback[df_feedback['timestamp'] >= datetime.now() - timedelta(days=7)]
+        st.metric("📅 This Week", len(recent_feedback))
 
     
     # Charts using Streamlit's built-in charting
