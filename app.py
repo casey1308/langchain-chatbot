@@ -412,9 +412,6 @@ if st.session_state.feedback_log:
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
 st.markdown("""
     <style>
-        .block-container {
-            padding-top: 0rem !important;
-        }
         section[data-testid="stSidebar"] > div:first-child {
             padding-top: 0rem !important;
             margin-top: 0rem !important;
