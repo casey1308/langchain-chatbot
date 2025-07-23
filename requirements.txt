@@ -6,3 +6,4 @@ chromadb
 python-dotenv
 pypdf
 scikit-learn
+serpapi
