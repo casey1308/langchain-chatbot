@@ -414,21 +414,24 @@ st.title("💼 Augmento- Your Investments Assistant")
 st.markdown("*Ask questions about our investment process, evaluation criteria, and more!*")
 st.markdown("""
 <script>
-document.addEventListener("keydown", function(event) {
-    const inputFocused = document.activeElement.tagName === 'INPUT';
-    const sendButtons = window.parent.document.querySelectorAll('button');
-    if (event.key === "Enter" && inputFocused) {
-        event.preventDefault();
-        sendButtons.forEach(btn => {
-            if (btn.innerText.includes("Send") || btn.innerText.includes("📤")) {
-                btn.click();
-            }
-        });
-    }
+window.addEventListener("load", () => {
+    const inputObserver = new MutationObserver(() => {
+        const input = window.parent.document.querySelector('[data-testid="stTextInput"] input');
+        const sendButton = window.parent.document.querySelector('button[kind="primary"]');
+        if (input && sendButton && !input.dataset.enterBound) {
+            input.addEventListener("keydown", function(event) {
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    sendButton.click();
+                }
+            });
+            input.dataset.enterBound = true;
+        }
+    });
+    inputObserver.observe(document, { childList: true, subtree: true });
 });
 </script>
 """, unsafe_allow_html=True)
-
 # Navigation tabs
 main_tab, analytics_tab = st.tabs(["💬 Chatbot", "📊 Analytics"])
 
