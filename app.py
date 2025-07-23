@@ -121,10 +121,7 @@ st.sidebar.subheader(f"📋 {selected_category} FAQs")
 for i, question in enumerate(faq_questions, 1):
     st.sidebar.write(f"{i}. {question}")
 
-if serpapi_api_key:
-    st.sidebar.success("🌐 Web search: Available")
-else:
-    st.sidebar.error("🌐 Web search: Unavailable (No API key)")
+st.sidebar.info("🌐 Web search: Enabled for investment topics.")
 
 # FAQ matching
 
