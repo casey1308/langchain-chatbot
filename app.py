@@ -541,7 +541,7 @@ st.markdown("💡 **Tip:** Try asking about fundraising documents, evaluation cr
 # Quick FAQ access
 st.markdown("---")
 
-if category_choice:
+if 'category_choice' in locals() and category_choice in faq_categories:
     st.header("📌 Quick FAQ Access")
     for q, a in faq_categories[category_choice].items():
         with st.expander(f"❓ {q}"):
