@@ -1,9 +1,9 @@
 streamlit
-openai
-langchain
-langchain-community
-serpapi
+pandas
 python-dotenv
-pypdf
-chromadb
+openai
+langchain-openai
+langchain-core
+langchain-community
 scikit-learn
+google-search-results
