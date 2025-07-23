@@ -6,8 +6,7 @@ import csv
 import pandas as pd
 import logging
 import requests
-import plotly.express as px
-import plotly.graph_objects as go
+import numpy as np
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from io import StringIO
@@ -251,7 +250,7 @@ def display_analytics():
         recent_feedback = df_feedback[df_feedback['timestamp'] >= datetime.now() - timedelta(days=7)]
         st.metric("📅 This Week", len(recent_feedback))
     
-    # Charts
+    # Charts using Streamlit's built-in charting
     tab1, tab2, tab3, tab4 = st.tabs(["📈 Ratings", "📋 Categories", "🕐 Activity", "💬 Comments"])
     
     with tab1:
@@ -259,87 +258,108 @@ def display_analytics():
         col1, col2 = st.columns(2)
         
         with col1:
+            st.subheader("📊 Rating Distribution")
             rating_counts = df_feedback['rating'].value_counts().sort_index()
-            fig_rating = px.bar(
-                x=rating_counts.index,
-                y=rating_counts.values,
-                labels={'x': 'Rating', 'y': 'Count'},
-                title="Rating Distribution",
-                color=rating_counts.values,
-                color_continuous_scale="RdYlGn"
-            )
-            fig_rating.update_layout(showlegend=False)
-            st.plotly_chart(fig_rating, use_container_width=True)
+            rating_df = pd.DataFrame({
+                'Rating': rating_counts.index,
+                'Count': rating_counts.values
+            })
+            st.bar_chart(rating_df.set_index('Rating'))
+            
+            # Show rating breakdown
+            for rating in range(1, 6):
+                count = rating_counts.get(rating, 0)
+                percentage = (count / len(df_feedback)) * 100 if len(df_feedback) > 0 else 0
+                st.write(f"⭐ {rating} stars: {count} responses ({percentage:.1f}%)")
         
         with col2:
-            # Rating trend over time
+            st.subheader("📈 Rating Trend Over Time")
             daily_ratings = df_feedback.groupby('date')['rating'].mean().reset_index()
-            fig_trend = px.line(
-                daily_ratings,
-                x='date',
-                y='rating',
-                title="Average Rating Trend",
-                markers=True
-            )
-            fig_trend.update_yaxis(range=[1, 5])
-            st.plotly_chart(fig_trend, use_container_width=True)
+            if len(daily_ratings) > 0:
+                daily_ratings = daily_ratings.set_index('date')
+                st.line_chart(daily_ratings)
+                
+                # Show recent trend
+                if len(daily_ratings) >= 2:
+                    recent_trend = daily_ratings['rating'].iloc[-1] - daily_ratings['rating'].iloc[-2]
+                    trend_emoji = "📈" if recent_trend > 0 else "📉" if recent_trend < 0 else "➡️"
+                    st.write(f"Recent trend: {trend_emoji} {recent_trend:+.2f}")
+            else:
+                st.info("Need more data points to show trend")
     
     with tab2:
         col1, col2 = st.columns(2)
         
         with col1:
+            st.subheader("📋 Category Performance")
             # Category performance
             category_stats = df_feedback.groupby('category').agg({
                 'rating': ['mean', 'count']
             }).round(2)
-            category_stats.columns = ['Avg Rating', 'Count']
-            category_stats = category_stats.sort_values('Avg Rating', ascending=False)
+            category_stats.columns = ['Avg_Rating', 'Count']
+            category_stats = category_stats.sort_values('Avg_Rating', ascending=False)
             
-            fig_category = px.bar(
-                x=category_stats.index,
-                y=category_stats['Avg Rating'],
-                title="Average Rating by Category",
-                color=category_stats['Avg Rating'],
-                color_continuous_scale="RdYlGn"
-            )
-            fig_category.update_layout(showlegend=False, xaxis_tickangle=-45)
-            st.plotly_chart(fig_category, use_container_width=True)
+            # Create a chart-friendly format
+            category_chart_df = category_stats.reset_index()
+            category_chart_df = category_chart_df.set_index('category')
+            st.bar_chart(category_chart_df['Avg_Rating'])
+            
+            # Show detailed stats
+            st.write("**Detailed Category Stats:**")
+            for category, row in category_stats.iterrows():
+                st.write(f"• **{category}**: {row['Avg_Rating']:.2f}⭐ ({row['Count']} responses)")
         
         with col2:
-            # Response type performance
+            st.subheader("🔍 Response Type Performance")
             response_type_stats = df_feedback.groupby('response_type').agg({
                 'rating': ['mean', 'count']
             }).round(2)
             response_type_stats.columns = ['Avg Rating', 'Count']
             
-            st.subheader("Performance by Response Type")
             st.dataframe(response_type_stats, use_container_width=True)
+            
+            # Visual representation
+            if len(response_type_stats) > 0:
+                response_chart_df = response_type_stats.reset_index().set_index('response_type')
+                st.bar_chart(response_chart_df['Avg Rating'])
     
     with tab3:
         col1, col2 = st.columns(2)
         
         with col1:
-            # Hourly activity
+            st.subheader("🕐 Activity by Hour")
             hourly_activity = df_feedback.groupby('hour').size()
-            fig_hourly = px.bar(
-                x=hourly_activity.index,
-                y=hourly_activity.values,
-                title="Activity by Hour of Day",
-                labels={'x': 'Hour', 'y': 'Number of Interactions'}
-            )
-            st.plotly_chart(fig_hourly, use_container_width=True)
+            if len(hourly_activity) > 0:
+                hourly_df = pd.DataFrame({
+                    'Hour': hourly_activity.index,
+                    'Interactions': hourly_activity.values
+                }).set_index('Hour')
+                st.bar_chart(hourly_df)
+                
+                # Show peak hours
+                peak_hour = hourly_activity.idxmax()
+                peak_count = hourly_activity.max()
+                st.write(f"🔥 Peak activity: {peak_hour}:00 ({peak_count} interactions)")
+            else:
+                st.info("No hourly data available yet")
         
         with col2:
-            # Daily activity
+            st.subheader("📅 Daily Activity Trend")
             daily_activity = df_feedback.groupby('date').size()
-            fig_daily = px.line(
-                x=daily_activity.index,
-                y=daily_activity.values,
-                title="Daily Activity Trend",
-                labels={'x': 'Date', 'y': 'Number of Interactions'},
-                markers=True
-            )
-            st.plotly_chart(fig_daily, use_container_width=True)
+            if len(daily_activity) > 0:
+                daily_df = pd.DataFrame({
+                    'Date': daily_activity.index,
+                    'Interactions': daily_activity.values
+                }).set_index('Date')
+                st.line_chart(daily_df)
+                
+                # Show stats
+                avg_daily = daily_activity.mean()
+                max_daily = daily_activity.max()
+                st.write(f"📊 Average daily interactions: {avg_daily:.1f}")
+                st.write(f"📈 Highest single day: {max_daily} interactions")
+            else:
+                st.info("Need more data to show daily trends")
     
     with tab4:
         # Recent comments
