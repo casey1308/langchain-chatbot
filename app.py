@@ -540,10 +540,9 @@ Use the web search results to provide a helpful response about startup investmen
     # Quick FAQ access
     st.markdown("---")
     st.header("📌 Quick FAQ Access")
-    fundraising_faqs = faq_categories.get("Fundraising Process", {})
-    for question, answer in list(fundraising_faqs.items())[:3]:  # Show top 3
-        with st.expander(f"❓ {question}"):
-            st.markdown(answer)
+    for q, a in faq_categories[category_choice].items():
+    with st.expander(f"❓ {q}"):
+        st.markdown(a)
 
 with analytics_tab:
     st.header("Feedback Analytics Dashboard")
