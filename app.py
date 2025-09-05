@@ -31,7 +31,6 @@ if not openai_api_key:
     st.error("❌ Please add your OPENAI_API_KEY to the .env file or Secrets.")
     st.stop()
 
-# Simple web search function using SerpAPI REST API
 def perform_web_search(query):
     if not serpapi_api_key:
         return "Web search requires SERPAPI_API_KEY to be configured."
@@ -80,8 +79,7 @@ if "user_analytics" not in st.session_state:
         "response_types": Counter(),
         "hourly_activity": Counter()
     }
-
-# Load existing feedback from CSV if exists
+    
 def load_feedback_from_csv():
     try:
         if os.path.exists("feedback_log.csv"):
@@ -90,7 +88,6 @@ def load_feedback_from_csv():
     except Exception as e:
         logger.warning(f"Could not load feedback log: {e}")
 
-# Save feedback to CSV
 def save_feedback_to_csv(feedback_entry):
     try:
         with open("feedback_log.csv", mode='a', newline='', encoding='utf-8') as f:
@@ -109,10 +106,8 @@ def save_feedback_to_csv(feedback_entry):
     except Exception as e:
         logger.warning(f"Failed to save feedback to CSV: {e}")
 
-# Load feedback on startup
 load_feedback_from_csv()
 
-# FAQ Categories
 faq_categories = {
     "Fundraising Process": {
         "What documents are needed for fundraising?":
@@ -158,7 +153,6 @@ faq_categories = {
     }
 }
 
-# FAQ matching function
 def get_best_faq_response(user_input):
     all_questions, all_answers, question_categories = [], [], []
     for category, qa_dict in faq_categories.items():
@@ -176,13 +170,9 @@ def get_best_faq_response(user_input):
 
     return (all_questions[top_index], all_answers[top_index], question_categories[top_index], top_score)
 
-# Feedback collection function
 def collect_feedback(question, response, category, response_type):
     st.subheader("📝 Rate this response")
-
-    # Generate a unique hash key based on the question + response
     hash_key = hashlib.md5(f"{question}_{response}".encode()).hexdigest()[:10]
-
     col1, col2 = st.columns([3, 2])
 
     with col1:
@@ -222,20 +212,17 @@ def collect_feedback(question, response, category, response_type):
         if rating == 5:
             st.balloons()
 
-# Analytics functions
 def display_analytics():
     if not st.session_state.feedback_log:
         st.info("📊 No feedback data available yet. Start asking questions and rating responses to see analytics!")
         return
     
     df_feedback = pd.DataFrame(st.session_state.feedback_log)
-    
-    # Convert timestamp to datetime
+
     df_feedback['timestamp'] = pd.to_datetime(df_feedback['timestamp'])
     df_feedback['date'] = df_feedback['timestamp'].dt.date
     df_feedback['hour'] = df_feedback['timestamp'].dt.hour
     
-    # Main metrics
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
@@ -255,11 +242,9 @@ def display_analytics():
         recent_feedback = df_feedback[df_feedback['timestamp'] >= datetime.now() - timedelta(days=7)]
         st.metric("📅 This Week", len(recent_feedback))
     
-    # Charts using Streamlit's built-in charting
     tab1, tab2, tab3, tab4 = st.tabs(["📈 Ratings", "📋 Categories", "🕐 Activity", "💬 Comments"])
     
     with tab1:
-        # Rating distribution
         col1, col2 = st.columns(2)
         
         with col1:
@@ -271,7 +256,6 @@ def display_analytics():
             })
             st.bar_chart(rating_df.set_index('Rating'))
             
-            # Show rating breakdown
             for rating in range(1, 6):
                 count = rating_counts.get(rating, 0)
                 percentage = (count / len(df_feedback)) * 100 if len(df_feedback) > 0 else 0
@@ -284,7 +268,6 @@ def display_analytics():
                 daily_ratings = daily_ratings.set_index('date')
                 st.line_chart(daily_ratings)
                 
-                # Show recent trend
                 if len(daily_ratings) >= 2:
                     recent_trend = daily_ratings['rating'].iloc[-1] - daily_ratings['rating'].iloc[-2]
                     trend_emoji = "📈" if recent_trend > 0 else "📉" if recent_trend < 0 else "➡️"
@@ -297,19 +280,16 @@ def display_analytics():
         
         with col1:
             st.subheader("📋 Category Performance")
-            # Category performance
             category_stats = df_feedback.groupby('category').agg({
                 'rating': ['mean', 'count']
             }).round(2)
             category_stats.columns = ['Avg_Rating', 'Count']
             category_stats = category_stats.sort_values('Avg_Rating', ascending=False)
             
-            # Create a chart-friendly format
             category_chart_df = category_stats.reset_index()
             category_chart_df = category_chart_df.set_index('category')
             st.bar_chart(category_chart_df['Avg_Rating'])
             
-            # Show detailed stats
             st.write("**Detailed Category Stats:**")
             for category, row in category_stats.iterrows():
                 st.write(f"• **{category}**: {row['Avg_Rating']:.2f}⭐ ({row['Count']} responses)")
@@ -323,7 +303,6 @@ def display_analytics():
             
             st.dataframe(response_type_stats, use_container_width=True)
             
-            # Visual representation
             if len(response_type_stats) > 0:
                 response_chart_df = response_type_stats.reset_index().set_index('response_type')
                 st.bar_chart(response_chart_df['Avg Rating'])
@@ -341,7 +320,6 @@ def display_analytics():
                 }).set_index('Hour')
                 st.bar_chart(hourly_df)
                 
-                # Show peak hours
                 peak_hour = hourly_activity.idxmax()
                 peak_count = hourly_activity.max()
                 st.write(f"🔥 Peak activity: {peak_hour}:00 ({peak_count} interactions)")
@@ -357,8 +335,6 @@ def display_analytics():
                     'Interactions': daily_activity.values
                 }).set_index('Date')
                 st.line_chart(daily_df)
-                
-                # Show stats
                 avg_daily = daily_activity.mean()
                 max_daily = daily_activity.max()
                 st.write(f"📊 Average daily interactions: {avg_daily:.1f}")
@@ -367,7 +343,6 @@ def display_analytics():
                 st.info("Need more data to show daily trends")
     
     with tab4:
-        # Recent comments
         st.subheader("Recent Comments")
         recent_comments = df_feedback[df_feedback['comments'].notna() & (df_feedback['comments'] != '')].tail(10)
         
@@ -379,11 +354,9 @@ def display_analytics():
         else:
             st.info("No comments yet. Users can leave comments when rating responses.")
     
-    # Detailed data table
     with st.expander("📋 Detailed Feedback Data"):
         st.dataframe(df_feedback.sort_values('timestamp', ascending=False), use_container_width=True)
         
-        # Download option
         csv_data = df_feedback.to_csv(index=False)
         st.download_button(
             label="📥 Download Feedback Data",
@@ -392,7 +365,6 @@ def display_analytics():
             mime="text/csv"
         )
 
-# Sidebar
 st.sidebar.title("FAQ Categories")
 selected_category = st.sidebar.selectbox("Choose a category", list(faq_categories.keys()))
 faq_data = faq_categories[selected_category]
@@ -404,7 +376,6 @@ for i, question in enumerate(faq_questions, 1):
 
 st.sidebar.info("🌐 Web search: Enabled for investment topics.")
 
-# Analytics in sidebar
 if st.session_state.feedback_log:
     st.sidebar.markdown("---")
     st.sidebar.subheader("Quick Stats")
@@ -413,7 +384,6 @@ if st.session_state.feedback_log:
     st.sidebar.metric("Avg Rating", f"{avg_rating:.1f}⭐")
     st.sidebar.metric("Total Feedback", len(df_temp))
 
-# Main UI
 st.set_page_config(page_title="Investment FAQ Chatbot", page_icon="💼", layout="wide")
 st.markdown("""
     <style>
@@ -475,7 +445,7 @@ window.addEventListener("load", () => {
 });
 </script>
 """, unsafe_allow_html=True)
-# Navigation tabs
+
 main_tab, analytics_tab = st.tabs(["💬 Chatbot", "📊 Analytics"])
 
 with main_tab:
@@ -503,7 +473,6 @@ with main_tab:
             llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.3)
             best_question, best_answer, category, similarity_score = get_best_faq_response(user_input)
 
-            # Update analytics
             st.session_state.user_analytics["total_questions"] += 1
             st.session_state.user_analytics["question_categories"][category] += 1
             current_hour = datetime.now().hour
@@ -546,7 +515,6 @@ Use the web search results to provide a helpful response about startup investmen
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.session_state.chat_history.append((user_input, final_response, timestamp, response_type, category))
 
-            # Log to CSV
             try:
                 with open("chat_log.csv", mode='a', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
@@ -565,7 +533,6 @@ Use the web search results to provide a helpful response about startup investmen
         st.success("Chat history cleared!")
         st.rerun()
 
-    # Display chat history with feedback
     if st.session_state.chat_history:
         st.header("📜 Recent Conversations")
         for i, (question, answer, timestamp, resp_type, category) in enumerate(reversed(st.session_state.chat_history[-5:])):
@@ -573,11 +540,9 @@ Use the web search results to provide a helpful response about startup investmen
                 st.markdown(f"**{resp_type}**")
                 st.markdown(f"**Answer:** {answer}")
                 
-                # Add feedback collection for each response
                 st.markdown("---")
                 collect_feedback(question, answer, category, resp_type)
 
-    # Render Quick FAQs based on category
 st.markdown("---")
 st.markdown("💡 **Tip:** Try asking about fundraising documents, evaluation criteria, investment focus, or due diligence process!")
 
@@ -592,6 +557,3 @@ for question, answer in faq_categories[selected_category].items():
 with analytics_tab:
     st.header("Feedback Analytics Dashboard")
     display_analytics()
-
-
-
