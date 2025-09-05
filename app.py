@@ -62,7 +62,6 @@ def perform_web_search(query):
         logger.error(f"Web search error: {e}")
         return f"Web search error: {str(e)}"
 
-# Initialize session state
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
