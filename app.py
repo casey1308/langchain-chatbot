@@ -18,8 +18,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 from collections import Counter
 import hashlib
 
-
-# Setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 load_dotenv()
