@@ -390,7 +390,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Title and description for Elevate Master
-st.title("Elevate Master — Hybrid Interview Mentor")
+st.title("Elevate Master - Hybrid Interview Mentor")
 st.markdown("*Practice mock technical interviews, solve coding problems, get instant feedback and learn — interaction mode: HYBRID (mock interviewer + teacher)*")
 st.markdown("**How to use:** Ask a coding question, paste code for review, request a mock interview prompt, or ask for behavioral answer prep. The assistant will first simulate interview behavior, then provide a teaching-style explanation and actionable improvement steps.")
 
