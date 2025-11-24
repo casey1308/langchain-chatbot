@@ -203,7 +203,7 @@ def collect_feedback(question, response, category, response_type):
 # Keep analytics display function unchanged (works for new domain)
 def display_analytics():
     if not st.session_state.feedback_log:
-        st.info("📊 No feedback data available yet. Start asking questions and rating responses to see analytics!")
+        st.info("No feedback data available yet. Start asking questions and rating responses to see analytics!")
         return
 
     df_feedback = pd.DataFrame(st.session_state.feedback_log)
@@ -216,20 +216,20 @@ def display_analytics():
 
     with col1:
         avg_rating = df_feedback['rating'].mean()
-        st.metric("📊 Average Rating", f"{avg_rating:.2f}/5",
+        st.metric("Average Rating", f"{avg_rating:.2f}/5",
                  delta=f"{avg_rating-3:.2f}" if avg_rating >= 3 else f"{avg_rating-3:.2f}")
 
     with col2:
         total_feedback = len(df_feedback)
-        st.metric("📝 Total Responses", total_feedback)
+        st.metric("Total Responses", total_feedback)
 
     with col3:
         satisfaction_rate = (df_feedback['rating'] >= 4).mean() * 100
-        st.metric("😊 Satisfaction Rate", f"{satisfaction_rate:.1f}%")
+        st.metric("Satisfaction Rate", f"{satisfaction_rate:.1f}%")
 
     with col4:
         recent_feedback = df_feedback[df_feedback['timestamp'] >= datetime.now() - timedelta(days=7)]
-        st.metric("📅 This Week", len(recent_feedback))
+        st.metric("This Week", len(recent_feedback))
 
     tab1, tab2, tab3, tab4 = st.tabs(["📈 Ratings", "📋 Categories", "🕐 Activity", "💬 Comments"])
 
@@ -316,7 +316,7 @@ def display_analytics():
                 st.info("No hourly data available yet")
 
         with col2:
-            st.subheader("📅 Daily Activity Trend")
+            st.subheader("Daily Activity Trend")
             daily_activity = df_feedback.groupby('date').size()
             if len(daily_activity) > 0:
                 daily_df = pd.DataFrame({
@@ -326,8 +326,8 @@ def display_analytics():
                 st.line_chart(daily_df)
                 avg_daily = daily_activity.mean()
                 max_daily = daily_activity.max()
-                st.write(f"📊 Average daily interactions: {avg_daily:.1f}")
-                st.write(f"📈 Highest single day: {max_daily} interactions")
+                st.write(f"Average daily interactions: {avg_daily:.1f}")
+                st.write(f"Highest single day: {max_daily} interactions")
             else:
                 st.info("Need more data to show daily trends")
 
@@ -390,7 +390,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Title and description for Elevate Master
-st.title("🧠 Elevate Master — Hybrid Interview Mentor")
+st.title("Elevate Master — Hybrid Interview Mentor")
 st.markdown("*Practice mock technical interviews, solve coding problems, get instant feedback and learn — interaction mode: HYBRID (mock interviewer + teacher)*")
 st.markdown("**How to use:** Ask a coding question, paste code for review, request a mock interview prompt, or ask for behavioral answer prep. The assistant will first simulate interview behavior, then provide a teaching-style explanation and actionable improvement steps.")
 
@@ -510,7 +510,7 @@ Be direct and structured. Start with interviewer-tone (short), then tutor-tone w
         st.rerun()
 
     if st.session_state.chat_history:
-        st.header("📜 Recent Conversations")
+        st.header("Recent Conversations")
         for i, (question, answer, timestamp, resp_type, category) in enumerate(reversed(st.session_state.chat_history[-8:])):
             with st.expander(f"Q{len(st.session_state.chat_history)-i}: {question} ({timestamp})", expanded=(i == 0)):
                 st.markdown(f"**{resp_type}**")
