@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from io import StringIO
 from openai import OpenAIError
-# Keep your LangChain/OpenAI client imports as used previously
+
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -64,7 +64,7 @@ def perform_web_search(query):
         logger.error(f"Web search error: {e}")
         return f"Web search error: {str(e)}"
 
-# Session state initialization (kept)
+
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
@@ -109,7 +109,6 @@ def save_feedback_to_csv(feedback_entry):
 
 load_feedback_from_csv()
 
-# --- FAQ categories rewritten for technical interview domain ---
 faq_categories = {
     "Coding & Algorithms": {
         "How to approach two-pointer problems?":
@@ -157,7 +156,6 @@ def get_best_faq_response(user_input):
 
     return (all_questions[top_index], all_answers[top_index], question_categories[top_index], top_score)
 
-# Feedback UI preserved
 def collect_feedback(question, response, category, response_type):
     st.subheader("📝 Rate this response")
     hash_key = hashlib.md5(f"{question}_{response}".encode()).hexdigest()[:10]
@@ -200,7 +198,6 @@ def collect_feedback(question, response, category, response_type):
         if rating == 5:
             st.balloons()
 
-# Keep analytics display function unchanged (works for new domain)
 def display_analytics():
     if not st.session_state.feedback_log:
         st.info("No feedback data available yet. Start asking questions and rating responses to see analytics!")
@@ -354,7 +351,6 @@ def display_analytics():
             mime="text/csv"
         )
 
-# Sidebar with technical categories
 st.sidebar.title("FAQ Categories")
 selected_category = st.sidebar.selectbox("Choose a category", list(faq_categories.keys()))
 faq_data = faq_categories[selected_category]
@@ -374,7 +370,6 @@ if st.session_state.feedback_log:
     st.sidebar.metric("Avg Rating", f"{avg_rating:.1f}⭐")
     st.sidebar.metric("Total Feedback", len(df_temp))
 
-# Page config and CSS tweaks
 st.set_page_config(page_title="Elevate Master - Interview Mentor", page_icon="🧠", layout="wide")
 st.markdown("""
     <style>
@@ -389,7 +384,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Title and description for Elevate Master
 st.title("Elevate Master - Hybrid Interview Mentor")
 st.markdown("*Practice mock technical interviews, solve coding problems, get instant feedback and learn — interaction mode: HYBRID (mock interviewer + teacher)*")
 st.markdown("**How to use:** Ask a coding question, paste code for review, request a mock interview prompt, or ask for behavioral answer prep. The assistant will first simulate interview behavior, then provide a teaching-style explanation and actionable improvement steps.")
@@ -418,7 +412,7 @@ with main_tab:
 
     if send and user_input.strip():
         try:
-            # instantiate LLM client (keeps your prior usage)
+            
             llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key, temperature=0.15)
 
             best_question, best_answer, category, similarity_score = get_best_faq_response(user_input)
@@ -428,22 +422,17 @@ with main_tab:
             current_hour = datetime.now().hour
             st.session_state.user_analytics["hourly_activity"][current_hour] += 1
 
-            # Build hybrid-system prompt for "Elevate Master"
+           
             with st.spinner("Elevate Master is preparing your session..."):
-                # If user input matches a FAQ strongly, return a short, focused FAQ-based response first
+               
                 if similarity_score >= 0.35:
-                    # Use the FAQ answer as quick guidance, then ask if user wants deep dive
+                    
                     response_text = f"**Quick Answer ({category}):**\n\n{best_answer}\n\nIf you'd like a deeper mock-interview style interaction (example tests, code, hints, follow-ups), reply 'deep dive' or ask for 'mock interview'."
                     final_response = response_text
                     response_type = f"📋 FAQ Quick Response ({category})"
                     st.session_state.user_analytics["response_types"]["FAQ"] += 1
                 else:
-                    # For coding / mock interview requests, create a hybrid prompt:
-                    # 1) act as a short mock interviewer: ask 1-2 clarifying Qs or give a prompt
-                    # 2) evaluate code if present
-                    # 3) provide solution, complexity, edge-cases, tests, and improvement suggestions
-                    # 4) offer 2 follow-up mock questions and one timed challenge
-                    # Check if user pasted code (simple heuristic)
+                
                     contains_code = ("```" in user_input) or ("\n" in user_input and ("def " in user_input or "class " in user_input or ";" in user_input))
                     if contains_code:
                         instruction = f"""
@@ -461,7 +450,7 @@ User input:
 Be concise in the interviewer-style bullets, then expand in the tutor/coach section.
 """
                     else:
-                        # User asked a question or wants mock interview
+            
                         instruction = f"""
 You are Elevate Master — hybrid interview mentor (mock interviewer + teacher). The user will be treated as an interview candidate.
 
@@ -478,7 +467,7 @@ User question:
 \"\"\"{user_input}\"\"\"
 Be direct and structured. Start with interviewer-tone (short), then tutor-tone with details and code where applicable.
 """
-                    # Call LLM
+                 
                     response = llm.invoke([
                         SystemMessage(content="You are Elevate Master — a hybrid mock-interviewer and technical coach. Be professional, precise, and helpful."),
                         HumanMessage(content=instruction)
@@ -490,7 +479,6 @@ Be direct and structured. Start with interviewer-tone (short), then tutor-tone w
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.session_state.chat_history.append((user_input, final_response, timestamp, response_type, category))
 
-            # Log chat to CSV
             try:
                 with open("chat_log.csv", mode='a', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
@@ -514,7 +502,6 @@ Be direct and structured. Start with interviewer-tone (short), then tutor-tone w
         for i, (question, answer, timestamp, resp_type, category) in enumerate(reversed(st.session_state.chat_history[-8:])):
             with st.expander(f"Q{len(st.session_state.chat_history)-i}: {question} ({timestamp})", expanded=(i == 0)):
                 st.markdown(f"**{resp_type}**")
-                # Display answer formatted - allow code blocks
                 st.markdown(answer)
                 st.markdown("---")
                 collect_feedback(question, answer, category, resp_type)
