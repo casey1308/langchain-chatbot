@@ -231,7 +231,7 @@ def display_analytics():
         recent_feedback = df_feedback[df_feedback['timestamp'] >= datetime.now() - timedelta(days=7)]
         st.metric("This Week", len(recent_feedback))
 
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Ratings", "📋 Categories", "🕐 Activity", "💬 Comments"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Ratings", "Categories", "Activity", "Comments"])
 
     with tab1:
         col1, col2 = st.columns(2)
@@ -268,7 +268,7 @@ def display_analytics():
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader("📋 Category Performance")
+            st.subheader("Category Performance")
             category_stats = df_feedback.groupby('category').agg({
                 'rating': ['mean', 'count']
             }).round(2)
@@ -284,7 +284,7 @@ def display_analytics():
                 st.write(f"• **{category}**: {row['Avg_Rating']:.2f}⭐ ({row['Count']} responses)")
 
         with col2:
-            st.subheader("🔍 Response Type Performance")
+            st.subheader("Response Type Performance")
             response_type_stats = df_feedback.groupby('response_type').agg({
                 'rating': ['mean', 'count']
             }).round(2)
@@ -394,7 +394,7 @@ st.title("Elevate Master — Hybrid Interview Mentor")
 st.markdown("*Practice mock technical interviews, solve coding problems, get instant feedback and learn — interaction mode: HYBRID (mock interviewer + teacher)*")
 st.markdown("**How to use:** Ask a coding question, paste code for review, request a mock interview prompt, or ask for behavioral answer prep. The assistant will first simulate interview behavior, then provide a teaching-style explanation and actionable improvement steps.")
 
-main_tab, analytics_tab = st.tabs(["💬 Chatbot", "📊 Analytics"])
+main_tab, analytics_tab = st.tabs(["Chatbot", "Analytics"])
 
 with main_tab:
     st.header("Ask your technical question or start a mock interview")
