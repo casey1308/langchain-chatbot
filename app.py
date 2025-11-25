@@ -31,7 +31,7 @@ if not openai_api_key:
     st.stop()
 
 def perform_web_search(query):
-    # keep this function but it's optional for coding queries; fallback only
+
     if not serpapi_api_key:
         return "Web search requires SERPAPI_API_KEY to be configured."
     try:
